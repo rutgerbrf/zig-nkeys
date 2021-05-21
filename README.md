@@ -7,3 +7,14 @@ Still a work in progress, things will definitely change!
 
 Contains a tool called `znk` which is a clone of the [`nk` tool](https://github.com/nats-io/nkeys/tree/master/nk).
 
+## Building
+
+Zig master works at the time of writing.
+
+Use `zig build` to build (the library and the `znk` tool).
+
+The `znk` tool can be run by using `zig build run`.
+
+Tests for the library can be run by using `zig build test`.
+Tests for the `znk` tool can be run by using `zig build znk-test`.
+
