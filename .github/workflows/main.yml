@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install the latest Zig version
+        run: sudo snap install zig --classic --edge
+
+      - uses: actions/checkout@v2
+
+      - name: Run library tests
+        run: zig build test
+
+      - name: Run znk tests
+        run: zib build test-znk
