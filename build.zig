@@ -13,21 +13,21 @@ pub fn build(b: *std.build.Builder) !void {
 
     const version = "0.1.0-dev";
 
-    const lib = b.addStaticLibrary("zats", "src/main.zig");
+    const lib = b.addStaticLibrary("zats", "src/nkeys.zig");
     lib.setBuildMode(mode);
     lib.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
     lib.install();
 
-    var main_tests = b.addTest("src/nkeys.zig");
-    main_tests.setBuildMode(mode);
-    main_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
+    var lib_tests = b.addTest("src/nkeys.zig");
+    lib_tests.setBuildMode(mode);
+    lib_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
     var znk_tests = b.addTest("src/znk.zig");
-    main_tests.setBuildMode(mode);
-    main_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
+    znk_tests.setBuildMode(mode);
+    znk_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&lib_tests.step);
 
     const znk_test_step = b.step("znk-test", "Run znk tests");
     znk_test_step.dependOn(&znk_tests.step);
