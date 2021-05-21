@@ -522,5 +522,9 @@ test {
 test {
     var creds_bytes = try std.fs.cwd().readFileAlloc(testing.allocator, "fixtures/test.creds", std.math.maxInt(usize));
     defer testing.allocator.free(creds_bytes);
+    
+    // TODO(rutgerbrf): validate the contents of the results of these functions
     _ = try parseDecoratedUserNKey(creds_bytes);
+    _ = try parseDecoratedJwt(creds_bytes);
 }
+
