@@ -20,4 +20,4 @@ jobs:
         run: zig build test
 
       - name: Run znk tests
-        run: zib build test-znk
+        run: zig build test-znk
