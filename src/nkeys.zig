@@ -388,7 +388,7 @@ pub fn fromRawSeed(prefix: PublicPrefixByte, raw_seed: *const [Ed25519.seed_leng
 }
 
 pub fn getNextLine(text: []const u8, off: *usize) ?[]const u8 {
-    if (off.* <= text.len) return null;
+    if (off.* >= text.len) return null;
     var newline_pos = mem.indexOfPos(u8, text, off.*, "\n") orelse return null;
     var start = off.*;
     var end = newline_pos;
@@ -427,6 +427,8 @@ pub fn findKeySection(text: []const u8, off: *usize) ?[]const u8 {
     // A newline must be present at the end of the key footer
     // See https://regex101.com/r/pEaqcJ/1 for a weird edge case in the github.com/nats-io/nkeys library
     // Another weird edge case: https://regex101.com/r/Xmqj1h/1
+
+    // TODO(rutgerbrf): switch to std.mem.SplitIterator
     while (true) {
         var opening_line = getNextLine(text, off) orelse return null;
         if (!isKeySectionBarrier(opening_line)) continue;
@@ -474,11 +476,11 @@ pub fn parseDecoratedNKey(contents: []const u8) !SeedKeyPair {
     var seed: ?[]const u8 = null;
     if (findKeySection(contents, &current_off) != null)
         seed = findKeySection(contents, &current_off);
-    if (seed != null)
+    if (seed == null)
         seed = findNKey(contents) orelse return error.NoNKeySeedFound;
     if (!validNKey(seed.?))
         return error.NoNKeySeedFound;
-    return fromSeed(contents[0..text_seed_len]);
+    return fromSeed(seed.?[0..text_seed_len]);
 }
 
 pub fn parseDecoratedUserNKey(contents: []const u8) !SeedKeyPair {
@@ -515,4 +517,10 @@ test {
     var pub_key = try key_pair.intoPublicKey();
     var pub_key_str_b = try pub_key.publicKey();
     try testing.expectEqualSlices(u8, &pub_key_str_a, &pub_key_str_b);
+}
+
+test {
+    var creds_bytes = try std.fs.cwd().readFileAlloc(testing.allocator, "fixtures/test.creds", std.math.maxInt(usize));
+    defer testing.allocator.free(creds_bytes);
+    _ = try parseDecoratedUserNKey(creds_bytes);
 }
