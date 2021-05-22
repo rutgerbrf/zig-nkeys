@@ -36,26 +36,11 @@ const usage =
     \\
 ;
 
-var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-
 pub fn main() anyerror!void {
-    // Stolen from the Zig compiler
-    var gpa_need_deinit = false;
-    const gpa = gpa: {
-        if (!std.builtin.link_libc) {
-            gpa_need_deinit = true;
-            break :gpa &general_purpose_allocator.allocator;
-        }
-        // We would prefer to use raw libc allocator here, but cannot
-        // use it if it won't support the alignment we need.
-        if (@alignOf(std.c.max_align_t) < @alignOf(i128)) {
-            break :gpa std.heap.c_allocator;
-        }
-        break :gpa std.heap.raw_c_allocator;
-    };
-    defer if (gpa_need_deinit) {
-        std.debug.assert(!general_purpose_allocator.deinit());
-    };
+    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(!general_purpose_allocator.deinit());
+    const gpa = &general_purpose_allocator.allocator;
+    
     var arena_instance = std.heap.ArenaAllocator.init(gpa);
     defer arena_instance.deinit();
     const arena = &arena_instance.allocator;
