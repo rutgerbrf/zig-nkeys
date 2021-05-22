@@ -182,16 +182,14 @@ pub const Decoder = struct {
 
     /// Get a character from the buffer.
     fn decodeChar(c: u8) DecodeError!u5 {
-        var value: u5 = 0;
         if (c >= 'A' and c <= 'Z') {
-            value = @truncate(u5, c - @as(u8, 'A'));
+            return @truncate(u5, c - @as(u8, 'A'));
         } else if (c >= '2' and c <= '9') {
             // '2' -> 26
-            value = @truncate(u5, c - @as(u8, '2') + 26);
+            return @truncate(u5, c - @as(u8, '2') + 26);
         } else {
             return error.CorruptInputError;
         }
-        return value;
     }
 
     /// Get the next 5-bit decoded character, read from `self.buffer`.
@@ -248,12 +246,12 @@ test {
     const decoded = "this is a test";
 
     var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
-    var decode_res = try Decoder.decode(&decode_buf, encoded);
+    const decode_res = try Decoder.decode(&decode_buf, encoded);
 
     try testing.expectEqualStrings(decoded, decode_res);
 
     var encode_buf: [Encoder.calcSize(decoded.len)]u8 = undefined;
-    var encode_res = Encoder.encode(&encode_buf, decoded);
+    const encode_res = Encoder.encode(&encode_buf, decoded);
 
     try testing.expectEqualStrings(encoded, encode_res);
 }
@@ -263,12 +261,12 @@ test {
     const decoded = &[_]u8{ 0x93, 0x40, 0x7f, 0x90, 0xfd, 0xbf, 0x1f, 0xd8, 0xe9, 0x9a, 0x89, 0x8b, 0xb5, 0xd4, 0x0b, 0xf3, 0x62, 0x54, 0x5d, 0x6d, 0xd1, 0x3d, 0xf7, 0x78, 0xad, 0x8d, 0x21, 0xc4, 0x8a, 0x01, 0x7a, 0xfd, 0xc3, 0x10, 0x2f, 0x5e };
 
     var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
-    var decode_res = try Decoder.decode(&decode_buf, encoded);
+    const decode_res = try Decoder.decode(&decode_buf, encoded);
 
     try testing.expectEqualSlices(u8, decoded, decode_res);
 
     var encode_buf: [Encoder.calcSize(decoded.len)]u8 = undefined;
-    var encode_res = Encoder.encode(&encode_buf, decoded);
+    const encode_res = Encoder.encode(&encode_buf, decoded);
 
     try testing.expectEqualSlices(u8, encoded, encode_res);
 }

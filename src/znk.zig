@@ -162,7 +162,7 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
 
         try PrefixKeyGenerator.init(arena, ty.?, capitalized_prefix).generate();
     } else {
-        var kp = nkeys.SeedKeyPair.init(ty.?) catch |e| fatal("could not generate key pair: {e}", .{e});
+        var kp = nkeys.SeedKeyPair.generate(ty.?) catch |e| fatal("could not generate key pair: {e}", .{e});
         defer kp.wipe();
         try stdout.writeAll(&kp.seed);
         try stdout.writeAll("\n");
@@ -396,7 +396,7 @@ const PrefixKeyGenerator = struct {
         while (true) {
             if (self.done.load(.SeqCst)) return;
 
-            var kp = nkeys.SeedKeyPair.init(self.ty) catch |e| fatal("could not generate key pair: {e}", .{e});
+            var kp = nkeys.SeedKeyPair.generate(self.ty) catch |e| fatal("could not generate key pair: {e}", .{e});
             defer kp.wipe();
             var public_key = kp.publicKey() catch |e| fatal("could not generate public key: {e}", .{e});
             if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
@@ -425,22 +425,6 @@ const PrefixKeyGenerator = struct {
     };
 };
 
-pub fn readKeyFile(allocator: *Allocator, file: fs.File) nkeys.Key {
-    var bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
-
-    var iterator = mem.split(bytes, "\n");
-    while (iterator.next()) |line| {
-        if (nkeys.isValidEncoding(line) and line.len == nkeys.text_seed_len) {
-            var k = nkeys.fromText(line) catch continue;
-            defer k.wipe();
-            allocator.free(bytes);
-            return k;
-        }
-    }
-
-    fatal("could not find a valid key", .{});
-}
-
 fn two(slice: []const bool) bool {
     var one = false;
     for (slice) |x| if (x and one) {
@@ -457,6 +441,79 @@ fn toUpper(allocator: *Allocator, slice: []const u8) ![]u8 {
     return result;
 }
 
+pub const Nkey = union(enum) {
+    seed_key_pair: nkeys.SeedKeyPair,
+    public_key: nkeys.PublicKey,
+
+    const Self = @This();
+
+    pub fn publicKey(self: *const Self) !nkeys.text_public {
+        return switch (self.*) {
+            .seed_key_pair => |*kp| try kp.publicKey(),
+            .public_key => |*pk| try pk.publicKey(),
+        };
+    }
+
+    pub fn intoPublicKey(self: *const Self) !nkeys.PublicKey {
+        return switch (self.*) {
+            .seed_key_pair => |*kp| try kp.intoPublicKey(),
+            .public_key => |pk| pk,
+        };
+    }
+
+    pub fn verify(
+        self: *const Self,
+        msg: []const u8,
+        sig: [std.crypto.sign.Ed25519.signature_length]u8,
+    ) !void {
+        return switch (self.*) {
+            .seed_key_pair => |*kp| try kp.verify(msg, sig),
+            .public_key => |*pk| try pk.verify(msg, sig),
+        };
+    }
+
+    pub fn wipe(self: *Self) void {
+        return switch (self.*) {
+            .seed_key_pair => |*kp| kp.wipe(),
+            .public_key => |*pk| pk.wipe(),
+        };
+    }
+
+    pub fn fromText(text: []const u8) !Self {
+        if (!nkeys.isValidEncoding(text)) return error.InvalidEncoding;
+        switch (text[0]) {
+            'S' => {
+                // It's a seed.
+                if (text.len != nkeys.text_seed_len) return error.InvalidSeed;
+                return Self{ .seed_key_pair = try nkeys.SeedKeyPair.fromTextSeed(text[0..nkeys.text_seed_len]) };
+            },
+            'P' => return error.InvalidEncoding, // unsupported for now
+            else => {
+                if (text.len != nkeys.text_public_len) return error.InvalidEncoding;
+                return Self{ .public_key = try nkeys.PublicKey.fromTextPublicKey(text[0..nkeys.text_public_len]) };
+            },
+        }
+    }
+};
+
+pub fn readKeyFile(allocator: *Allocator, file: fs.File) Nkey {
+    var bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
+
+    var iterator = mem.split(bytes, "\n");
+    while (iterator.next()) |line| {
+        if (nkeys.isValidEncoding(line) and line.len == nkeys.text_seed_len) {
+            var k = Nkey.fromText(line) catch continue;
+            defer k.wipe();
+            allocator.free(bytes);
+            return k;
+        }
+    }
+
+    fatal("could not find a valid key", .{});
+}
+
 test {
     testing.refAllDecls(@This());
+    testing.refAllDecls(Nkey);
+    testing.refAllDecls(PrefixKeyGenerator);
 }
