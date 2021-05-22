@@ -289,7 +289,7 @@ fn decode(
 ) !DecodedNKey(prefix_len, data_len) {
     var raw: [prefix_len + data_len + 2]u8 = undefined;
     defer wipeBytes(&raw);
-    std.debug.assert((try base32.decode(text[0..], &raw)) == raw.len);
+    _ = try base32.Decoder.decode(&raw, text[0..]);
 
     var checksum = mem.readIntLittle(u16, raw[raw.len - 2 .. raw.len]);
     try crc16.validate(raw[0 .. raw.len - 2], checksum);
@@ -347,25 +347,19 @@ pub fn fromSeed(text: *const text_seed) !SeedKeyPair {
 pub fn isValidEncoding(text: []const u8) bool {
     if (text.len < 4) return false;
     var made_crc: u16 = 0;
-    var dec = base32.Decoder{};
+    var dec = base32.Decoder.init(text);
     var crc_buf: [2]u8 = undefined;
     var crc_buf_len: u8 = 0;
-    var expect_len: usize = base32.decodedLen(text.len);
+    var expect_len: usize = base32.Decoder.calcSize(text.len);
     var wrote_n_total: usize = 0;
-    for (text) |c, i| {
-        var b = (dec.read(c) catch return false) orelse continue;
+    while (dec.next() catch return false) |b| {
         wrote_n_total += 1;
         if (crc_buf_len == 2) made_crc = crc16.update(made_crc, &.{crc_buf[0]});
         crc_buf[0] = crc_buf[1];
         crc_buf[1] = b;
         if (crc_buf_len != 2) crc_buf_len += 1;
     }
-    if (dec.out_off != 0 and wrote_n_total < expect_len) {
-        if (crc_buf_len == 2) made_crc = crc16.update(made_crc, &.{crc_buf[0]});
-        crc_buf[0] = crc_buf[1];
-        crc_buf[1] = dec.buf;
-        if (crc_buf_len != 2) crc_buf_len += 1;
-    }
+    std.debug.assert(wrote_n_total == expect_len);
     if (crc_buf_len != 2) unreachable;
     var got_crc = mem.readIntLittle(u16, &crc_buf);
     return made_crc == got_crc;

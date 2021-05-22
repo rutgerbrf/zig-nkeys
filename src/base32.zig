@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 
 pub const Encoder = struct {
     const Self = @This();
@@ -25,7 +26,7 @@ pub const Encoder = struct {
         std.debug.assert(dest.len >= out_len);
 
         var e = init(source);
-        for (dest) |*b| b.* = e.next() orelse unreachable;
+        for (dest[0..out_len]) |*b| b.* = e.next() orelse unreachable;
         return dest[0..out_len];
     }
 
@@ -94,8 +95,8 @@ pub const Encoder = struct {
     }
 
     // Returns the next 5-bit integer, read from `self.buffer`.
-    fn next_u5(self: *Self) ?u5 {
-        // `self.buffer` is read 5 bits at a time by `next_u5`.
+    fn nextU5(self: *Self) ?u5 {
+        // `self.buffer` is read 5 bits at a time by `nextU5`.
         // Because of the elements of `self.buffer` being 8 bits each, we need to
         // read from 2 bytes from `self.buffer` to return a whole u5.
         // `front_bits` are the bits that come first, read from `self.buffer[self.index]`.
@@ -118,7 +119,7 @@ pub const Encoder = struct {
                 self.index = null;
             }
         } else {
-            // We need to read from the current byte in the next call to `next_u5` too.
+            // We need to read from the current byte in the next call to `nextU5` too.
             self.bit_off += 5;
         }
 
@@ -132,40 +133,43 @@ pub const Encoder = struct {
 
     // Returns the next byte of the encoded buffer.
     pub fn next(self: *Self) ?u8 {
-        const unencoded = self.next_u5() orelse return null;
+        const unencoded = self.nextU5() orelse return null;
         return char(unencoded);
     }
 };
-
-// TODO(rutgerbrf): simplify the code of the decoder
 
 pub const DecodeError = error{CorruptInputError};
 
 pub const Decoder = struct {
     const Self = @This();
 
-    out_off: u4 = 0,
-    buf: u8 = 0,
+    buffer: []const u8,
+    index: ?usize,
 
-    pub fn read(self: *Self, c: u8) DecodeError!?u8 {
-        var ret: ?u8 = null;
-        var decoded_c = try decodeChar(c);
-        var bits_left: u3 = 5;
-        while (bits_left > 0) {
-            var space_avail: u4 = 8 - self.out_off;
-            var write_bits: u3 = if (bits_left < space_avail) bits_left else @truncate(u3, space_avail);
-            bits_left -= write_bits;
-            var mask: u8 = (@as(u8, 0x01) << write_bits) - 1;
-            var want: u8 = (decoded_c >> bits_left) & mask;
-            self.buf |= want << @truncate(u3, space_avail - write_bits);
-            self.out_off += write_bits;
-            if (self.out_off == 8) {
-                ret = self.buf;
-                self.out_off = 0;
-                self.buf = 0;
-            }
-        }
-        return ret;
+    buf: u8,
+    buf_len: u4,
+
+    pub fn init(buffer: []const u8) Self {
+        return .{
+            .buffer = buffer,
+            .index = 0,
+            .buf_len = 0,
+            .buf = 0,
+        };
+    }
+
+    pub fn calcSize(source_len: usize) usize {
+        const source_len_bits = source_len * 5;
+        return source_len_bits / 8;
+    }
+
+    pub fn decode(dest: []u8, source: []const u8) DecodeError![]const u8 {
+        const out_len = calcSize(source.len);
+        std.debug.assert(dest.len >= out_len);
+
+        var d = init(source);
+        for (dest[0..out_len]) |*b| b.* = (try d.next()) orelse unreachable;
+        return dest[0..out_len];
     }
 
     fn decodeChar(p: u8) DecodeError!u5 {
@@ -180,26 +184,57 @@ pub const Decoder = struct {
         }
         return value;
     }
+
+    fn nextU5(self: *Self) DecodeError!?u5 {
+        const index = self.index orelse return null;
+        self.index = if (index + 1 < self.buffer.len) index + 1 else null;
+        return try decodeChar(self.buffer[index]);
+    }
+
+    pub fn next(self: *Self) DecodeError!?u8 {
+        var read_any = false;
+        while (true) {
+            const c = (try self.nextU5()) orelse break;
+            const buf_remaining_len = 8 - self.buf_len;
+            const write_len = if (buf_remaining_len > 5) 5 else buf_remaining_len;
+            const c_remaining_len = 5 - write_len;
+            self.buf |= (@as(u8, c) << 3) >> @truncate(u3, self.buf_len);
+            self.buf_len += write_len;
+            read_any = true;
+            if (self.buf_len == 8) {
+                const ret = self.buf;
+                self.buf_len = c_remaining_len;
+                self.buf = 0;
+                if (write_len != 5) self.buf = @as(u8, c) << @truncate(u3, write_len + 3);
+                return ret;
+            }
+        }
+        if ((self.buf_len == 0 or self.buf == 0) and !read_any) return null;
+
+        const ret = self.buf;
+        self.buf_len = 0;
+        self.buf = 0;
+
+        return ret;
+    }
 };
 
-pub fn decodedLen(enc_len: usize) usize {
-    const enc_len_bits = enc_len * 5;
-    return enc_len_bits / 8;
+test {
+    const encoded = "ORUGS4ZANFZSAYJAORSXG5A";
+    const decoded = "this is a test";
+
+    var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
+    _ = try Decoder.decode(&decode_buf, encoded);
+
+    try testing.expectEqualStrings(decoded, &decode_buf);
 }
 
-pub fn decode(ps: []const u8, out: []u8) DecodeError!usize {
-    var d = Decoder{};
-    var i: usize = 0;
-    for (ps) |p| {
-        if (i >= out.len) break;
-        if (try d.read(p)) |b| {
-            out[i] = b;
-            i += 1;
-        }
-    }
-    if (d.out_off != 0 and i < out.len) {
-        out[i] = d.buf;
-        i += 1;
-    }
-    return i; // amount of bytes processed
+test {
+    const encoded = "SNAH7EH5X4P5R2M2RGF3LVAL6NRFIXLN2E67O6FNRUQ4JCQBPL64GEBPLY";
+    const decoded = [_]u8{ 0x93, 0x40, 0x7f, 0x90, 0xfd, 0xbf, 0x1f, 0xd8, 0xe9, 0x9a, 0x89, 0x8b, 0xb5, 0xd4, 0x0b, 0xf3, 0x62, 0x54, 0x5d, 0x6d, 0xd1, 0x3d, 0xf7, 0x78, 0xad, 0x8d, 0x21, 0xc4, 0x8a, 0x01, 0x7a, 0xfd, 0xc3, 0x10, 0x2f, 0x5e };
+
+    var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
+    _ = try Decoder.decode(&decode_buf, encoded);
+
+    try testing.expectEqualSlices(u8, &decoded, &decode_buf);
 }
