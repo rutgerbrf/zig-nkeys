@@ -248,17 +248,27 @@ test {
     const decoded = "this is a test";
 
     var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
-    _ = try Decoder.decode(&decode_buf, encoded);
+    var decode_res = try Decoder.decode(&decode_buf, encoded);
 
-    try testing.expectEqualStrings(decoded, &decode_buf);
+    try testing.expectEqualStrings(decoded, decode_res);
+
+    var encode_buf: [Encoder.calcSize(decoded.len)]u8 = undefined;
+    var encode_res = Encoder.encode(&encode_buf, decoded);
+
+    try testing.expectEqualStrings(encoded, encode_res);
 }
 
 test {
     const encoded = "SNAH7EH5X4P5R2M2RGF3LVAL6NRFIXLN2E67O6FNRUQ4JCQBPL64GEBPLY";
-    const decoded = [_]u8{ 0x93, 0x40, 0x7f, 0x90, 0xfd, 0xbf, 0x1f, 0xd8, 0xe9, 0x9a, 0x89, 0x8b, 0xb5, 0xd4, 0x0b, 0xf3, 0x62, 0x54, 0x5d, 0x6d, 0xd1, 0x3d, 0xf7, 0x78, 0xad, 0x8d, 0x21, 0xc4, 0x8a, 0x01, 0x7a, 0xfd, 0xc3, 0x10, 0x2f, 0x5e };
+    const decoded = &[_]u8{ 0x93, 0x40, 0x7f, 0x90, 0xfd, 0xbf, 0x1f, 0xd8, 0xe9, 0x9a, 0x89, 0x8b, 0xb5, 0xd4, 0x0b, 0xf3, 0x62, 0x54, 0x5d, 0x6d, 0xd1, 0x3d, 0xf7, 0x78, 0xad, 0x8d, 0x21, 0xc4, 0x8a, 0x01, 0x7a, 0xfd, 0xc3, 0x10, 0x2f, 0x5e };
 
     var decode_buf: [Decoder.calcSize(encoded.len)]u8 = undefined;
-    _ = try Decoder.decode(&decode_buf, encoded);
+    var decode_res = try Decoder.decode(&decode_buf, encoded);
 
-    try testing.expectEqualSlices(u8, &decoded, &decode_buf);
+    try testing.expectEqualSlices(u8, decoded, decode_res);
+
+    var encode_buf: [Encoder.calcSize(decoded.len)]u8 = undefined;
+    var encode_res = Encoder.encode(&encode_buf, decoded);
+
+    try testing.expectEqualSlices(u8, encoded, encode_res);
 }
