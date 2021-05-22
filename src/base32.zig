@@ -29,8 +29,10 @@ pub const Encoder = struct {
         return dest[0..out_len];
     }
 
-    fn n_front_bits(self: *const Self) u3 {
-        // bit_off   n_front_bits
+    // Calculates the amount of bits can be read from `self.buffer[self.index]`,
+    // with a maximum of 5 and an offset of `self.bit_off`.
+    fn frontBitsLen(self: *const Self) u3 {
+        // bit_off   frontBitsLen
         // 0         5
         // 1         5
         // 2         5
@@ -42,8 +44,22 @@ pub const Encoder = struct {
         return if (self.bit_off <= 3) 5 else 7 - self.bit_off + 1;
     }
 
-    fn front(self: *const Self, index: usize) u5 {
-        // bit_off   bits         shl   shr   front
+    // Returns the bits of `self.buffer[self.index]`, read with an offset of `self.bit_off`,
+    // aligned to the left of the 5-bit unsigned integer.
+    // Returns null if `self.index` is null.
+    // An illustration of its behaviour, with `self.buffer[self.index]` being 0b10010111:
+    // | `self.bit_off` | `frontBits` |
+    // |----------------|-------------|
+    // | 0              | 0b10010     |
+    // | 1              | 0b00101     |
+    // | 2              | 0b01011     |
+    // | 3              | 0b10111     |
+    // | 4              | 0b01110     |
+    // | 5              | 0b11100     |
+    // | 6              | 0b11000     |
+    // | 7              | 0b10000     |
+    fn frontBits(self: *const Self) ?u5 {
+        // bit_off   bitmask      shl   shr   frontBits
         // 0         0b11111000         3     0b11111
         // 1         0b01111100         2     0b11111
         // 2         0b00111110         1     0b11111
@@ -52,33 +68,57 @@ pub const Encoder = struct {
         // 5         0b00000111   2           0b11100
         // 6         0b00000011   3           0b11000
         // 7         0b00000001   4           0b10000
+        const index = self.index orelse return null;
         const bitmask = @as(u8, 0b11111000) >> self.bit_off;
         const bits = self.buffer[index] & bitmask;
         if (self.bit_off >= 4) return @truncate(u5, bits << (self.bit_off - 3));
         return @truncate(u5, bits >> (3 - self.bit_off));
     }
 
-    fn back(self: *const Self, index: usize, bits: u3) u5 {
-        if (bits == 0) return 0;
-        return @truncate(u5, self.buffer[index] >> (7 - bits + 1));
+    // Returns the `self.buffer[self.index]` with the maximum amount specified by the `bits` parameter,
+    // aligned to the right of the 5-bit unsigned integer.
+    // Because a 5-bit integer is returned, not more than 5 bits can be read. `bits` must not be greater than 5.
+    // An illustration of its behaviour, with `self.buffer[self.index]` being 0b11101001:
+    // | `bits` | `backBits` |
+    // |--------|------------|
+    // | 0      | 0b00000    |
+    // | 1      | 0b10000    |
+    // | 2      | 0b11000    |
+    // | 3      | 0b11100    |
+    // | 4      | 0b11100    |
+    // | 5      | 0b11101    |
+    fn backBits(self: *const Self, bits: u3) u5 {
+        std.debug.assert(bits <= 5);
+        if (bits == 0 or self.index == null) return 0;
+        return @truncate(u5, self.buffer[self.index.?] >> (7 - bits + 1));
     }
 
+    // Returns the next 5-bit integer, read from `self.buffer`.
     fn next_u5(self: *Self) ?u5 {
-        const front_index = self.index orelse return null;
-        const num_front_bits = self.n_front_bits();
-        const front_bits = self.front(front_index);
+        // `self.buffer` is read 5 bits at a time by `next_u5`.
+        // Because of the elements of `self.buffer` being 8 bits each, we need to
+        // read from 2 bytes from `self.buffer` to return a whole u5.
+        // `front_bits` are the bits that come first, read from `self.buffer[self.index]`.
+        // `back_bits` are the bits that come last, read from `self.buffer[self.index + 1]`.
+        // `back_bits` is only used when we can't read 5 bits from `self.buffer[self.index]`.
+
+        const front_bits = self.frontBits() orelse return null;
+        const n_front_bits = self.frontBitsLen();
 
         var back_bits: u5 = 0;
         if (self.bit_off >= 3) {
-            self.bit_off -= 3;
-            const new_index = front_index + 1;
+            // Next time we'll need to read from the next byte in `self.buffer`.
+            // We may need to grab the back bits from that next byte for this call too (if it exist).
+            self.bit_off -= 3; // same as self.bit_off + 5 - 8
+            const new_index = self.index.? + 1;
             if (self.buffer.len > new_index) {
                 self.index = new_index;
-                back_bits = self.back(new_index, 5 - num_front_bits);
+                back_bits = self.backBits(5 - n_front_bits);
             } else {
                 self.index = null;
             }
         } else {
+            // We need to read from the current byte in the next call to `next_u5` too.
             self.bit_off += 5;
         }
 
