@@ -8,6 +8,7 @@ pub const Encoder = struct {
     index: ?usize,
     bit_off: u3,
 
+    /// Init the encoder.
     pub fn init(buffer: []const u8) Encoder {
         return .{
             .buffer = buffer,
@@ -16,11 +17,14 @@ pub const Encoder = struct {
         };
     }
 
+    /// Calculate the Base32-encoded size of an array of bytes.
     pub fn calcSize(source_len: usize) usize {
         const source_len_bits = source_len * 8;
         return source_len_bits / 5 + (if (source_len_bits % 5 > 0) @as(usize, 1) else 0);
     }
 
+    /// Encode some data as Base32.
+    /// Note that `dest.len` must at least be as big as `Encoder.calcSize(source.len)`.
     pub fn encode(dest: []u8, source: []const u8) []const u8 {
         const out_len = calcSize(source.len);
         std.debug.assert(dest.len >= out_len);
@@ -30,8 +34,8 @@ pub const Encoder = struct {
         return dest[0..out_len];
     }
 
-    // Calculates the amount of bits can be read from `self.buffer[self.index]`,
-    // with a maximum of 5 and an offset of `self.bit_off`.
+    /// Calculate the amount of bits can be read from `self.buffer[self.index]`,
+    /// with a maximum of 5 and an offset of `self.bit_off`.
     fn frontBitsLen(self: *const Self) u3 {
         // bit_off   frontBitsLen
         // 0         5
@@ -45,20 +49,20 @@ pub const Encoder = struct {
         return if (self.bit_off <= 3) 5 else 7 - self.bit_off + 1;
     }
 
-    // Returns the bits of `self.buffer[self.index]`, read with an offset of `self.bit_off`,
-    // aligned to the left of the 5-bit unsigned integer.
-    // Returns null if `self.index` is null.
-    // An illustration of its behaviour, with `self.buffer[self.index]` being 0b10010111:
-    // | `self.bit_off` | `frontBits` |
-    // |----------------|-------------|
-    // | 0              | 0b10010     |
-    // | 1              | 0b00101     |
-    // | 2              | 0b01011     |
-    // | 3              | 0b10111     |
-    // | 4              | 0b01110     |
-    // | 5              | 0b11100     |
-    // | 6              | 0b11000     |
-    // | 7              | 0b10000     |
+    /// Get the bits of `self.buffer[self.index]`, read with an offset of `self.bit_off`,
+    /// aligned to the left of the 5-bit unsigned integer.
+    /// Returns null if `self.index` is null.
+    /// An illustration of its behaviour, with `self.buffer[self.index]` being 0b10010111:
+    /// | `self.bit_off` | `frontBits` |
+    /// |----------------|-------------|
+    /// | 0              | 0b10010     |
+    /// | 1              | 0b00101     |
+    /// | 2              | 0b01011     |
+    /// | 3              | 0b10111     |
+    /// | 4              | 0b01110     |
+    /// | 5              | 0b11100     |
+    /// | 6              | 0b11000     |
+    /// | 7              | 0b10000     |
     fn frontBits(self: *const Self) ?u5 {
         // bit_off   bitmask      shl   shr   frontBits
         // 0         0b11111000         3     0b11111
@@ -76,25 +80,25 @@ pub const Encoder = struct {
         return @truncate(u5, bits >> (3 - self.bit_off));
     }
 
-    // Returns the `self.buffer[self.index]` with the maximum amount specified by the `bits` parameter,
-    // aligned to the right of the 5-bit unsigned integer.
-    // Because a 5-bit integer is returned, not more than 5 bits can be read. `bits` must not be greater than 5.
-    // An illustration of its behaviour, with `self.buffer[self.index]` being 0b11101001:
-    // | `bits` | `backBits` |
-    // |--------|------------|
-    // | 0      | 0b00000    |
-    // | 1      | 0b10000    |
-    // | 2      | 0b11000    |
-    // | 3      | 0b11100    |
-    // | 4      | 0b11100    |
-    // | 5      | 0b11101    |
+    /// Get the bits of `self.buffer[self.index]` with the maximum amount specified by the `bits` parameter,
+    /// aligned to the right of the 5-bit unsigned integer.
+    /// Because a 5-bit integer is returned, not more than 5 bits can be read. `bits` must not be greater than 5.
+    /// An illustration of its behaviour, with `self.buffer[self.index]` being 0b11101001:
+    /// | `bits` | `backBits` |
+    /// |--------|------------|
+    /// | 0      | 0b00000    |
+    /// | 1      | 0b10000    |
+    /// | 2      | 0b11000    |
+    /// | 3      | 0b11100    |
+    /// | 4      | 0b11100    |
+    /// | 5      | 0b11101    |
     fn backBits(self: *const Self, bits: u3) u5 {
         std.debug.assert(bits <= 5);
         if (bits == 0 or self.index == null) return 0;
         return @truncate(u5, self.buffer[self.index.?] >> (7 - bits + 1));
     }
 
-    // Returns the next 5-bit integer, read from `self.buffer`.
+    /// Get the next 5-bit integer, read from `self.buffer`.
     fn nextU5(self: *Self) ?u5 {
         // `self.buffer` is read 5 bits at a time by `nextU5`.
         // Because of the elements of `self.buffer` being 8 bits each, we need to
@@ -126,12 +130,12 @@ pub const Encoder = struct {
         return front_bits | back_bits;
     }
 
-    // Returns the corresponding ASCII character for 5 bits of the input.
+    /// Get the corresponding ASCII character for 5 bits of the input.
     fn char(unencoded: u5) u8 {
         return unencoded + (if (unencoded < 26) @as(u8, 'A') else '2' - 26);
     }
 
-    // Returns the next byte of the encoded buffer.
+    /// Get the next byte of the encoded buffer.
     pub fn next(self: *Self) ?u8 {
         const unencoded = self.nextU5() orelse return null;
         return char(unencoded);
@@ -149,6 +153,7 @@ pub const Decoder = struct {
     buf: u8,
     buf_len: u4,
 
+    /// Init the decoder.
     pub fn init(buffer: []const u8) Self {
         return .{
             .buffer = buffer,
@@ -158,11 +163,14 @@ pub const Decoder = struct {
         };
     }
 
+    /// Calculate the size of a Base32-encoded array of bytes.
     pub fn calcSize(source_len: usize) usize {
         const source_len_bits = source_len * 5;
         return source_len_bits / 8;
     }
 
+    /// Decode a slice of Base32-encoded data.
+    /// Note that `dest.len` must at least be as big as `Decoder.calcSize(source.len)`.
     pub fn decode(dest: []u8, source: []const u8) DecodeError![]const u8 {
         const out_len = calcSize(source.len);
         std.debug.assert(dest.len >= out_len);
@@ -172,44 +180,60 @@ pub const Decoder = struct {
         return dest[0..out_len];
     }
 
-    fn decodeChar(p: u8) DecodeError!u5 {
+    /// Get a character from the buffer.
+    fn decodeChar(c: u8) DecodeError!u5 {
         var value: u5 = 0;
-        if (p >= 'A' and p <= 'Z') {
-            value = @truncate(u5, p - @as(u8, 'A'));
-        } else if (p >= '2' and p <= '9') {
+        if (c >= 'A' and c <= 'Z') {
+            value = @truncate(u5, c - @as(u8, 'A'));
+        } else if (c >= '2' and c <= '9') {
             // '2' -> 26
-            value = @truncate(u5, p - @as(u8, '2') + 26);
+            value = @truncate(u5, c - @as(u8, '2') + 26);
         } else {
             return error.CorruptInputError;
         }
         return value;
     }
 
+    /// Get the next 5-bit decoded character, read from `self.buffer`.
     fn nextU5(self: *Self) DecodeError!?u5 {
         const index = self.index orelse return null;
         self.index = if (index + 1 < self.buffer.len) index + 1 else null;
         return try decodeChar(self.buffer[index]);
     }
 
+    /// Get the next byte of the decoded buffer.
     pub fn next(self: *Self) DecodeError!?u8 {
-        var read_any = false;
         while (true) {
+            // Read a character and decode it.
             const c = (try self.nextU5()) orelse break;
+            // Check how many bits we can write to the buffer.
             const buf_remaining_len = 8 - self.buf_len;
-            const write_len = if (buf_remaining_len > 5) 5 else buf_remaining_len;
-            const c_remaining_len = 5 - write_len;
+            // Calculate how many bytes we will write to the buffer (the decoded character represents 5 bits).
+            const buf_write_len = if (buf_remaining_len > 5) 5 else buf_remaining_len;
+            // Calculate how many bits of the decoded remain when we've written part of it to the buffer.
+            const c_remaining_len = 5 - buf_write_len;
+            // Write (the first) part of the decoded character to the buffer.
             self.buf |= (@as(u8, c) << 3) >> @truncate(u3, self.buf_len);
-            self.buf_len += write_len;
-            read_any = true;
+            self.buf_len += buf_write_len;
             if (self.buf_len == 8) {
+                // The buffer is full, we can return a byte.
                 const ret = self.buf;
                 self.buf_len = c_remaining_len;
                 self.buf = 0;
-                if (write_len != 5) self.buf = @as(u8, c) << @truncate(u3, write_len + 3);
+                if (buf_write_len != 5) {
+                    // We didn't write the entire decoded character to the buffer.
+                    // Write the remaining part to the beginning of the buffer.
+                    self.buf = @as(u8, c) << @truncate(u3, buf_write_len + 3);
+                }
                 return ret;
             }
         }
-        if ((self.buf_len == 0 or self.buf == 0) and !read_any) return null;
+
+        // We aren't able to read any characters anymore.
+        // If the buffer doesn't contain any (actual) data we can stop decoding.
+        // Otherwise, we can return what remains in the buffer, and stop decoding
+        // after having done that.
+        if (self.buf == 0 and self.buf_len < 5) return null;
 
         const ret = self.buf;
         self.buf_len = 0;
