@@ -40,7 +40,7 @@ pub fn main() anyerror!void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!general_purpose_allocator.deinit());
     const gpa = &general_purpose_allocator.allocator;
-    
+
     var arena_instance = std.heap.ArenaAllocator.init(gpa);
     defer arena_instance.deinit();
     const arena = &arena_instance.allocator;
