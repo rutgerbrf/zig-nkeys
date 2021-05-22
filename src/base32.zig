@@ -1,39 +1,82 @@
 const std = @import("std");
 
-// TODO(rutgerbrf): simplify the code of the encoder & decoder?
-
 pub const Encoder = struct {
     const Self = @This();
 
-    out_off: u4 = 0,
-    buf: u5 = 0,
+    buffer: []const u8,
+    index: ?usize,
+    bit_off: u3,
 
-    pub fn write(self: *Self, b: u8, out: []u8) usize {
-        var i: usize = 0;
-        var bits_left: u4 = 8;
-        while (bits_left > 0) {
-            var space_avail = @truncate(u3, 5 - self.out_off);
-            var write_bits: u3 = if (bits_left < space_avail) @truncate(u3, bits_left) else space_avail;
-            bits_left -= write_bits;
-            var mask: u8 = (@as(u8, 0x01) << write_bits) - 1;
-            var want: u8 = (b >> @truncate(u3, bits_left)) & mask;
-            self.buf |= @truncate(u5, want << (space_avail - write_bits));
-            self.out_off += write_bits;
-            if (self.out_off == 5) {
-                if (i >= out.len) break;
-                out[i] = self.char();
-                i += 1;
-                self.out_off = 0;
-                self.buf = 0;
-            }
-        }
-        return i;
+    fn bitmask(self: *const Self) u8 {
+        return @as(u8, 0b11111000) >> self.bit_off;
     }
 
-    fn char(self: *const Self) u8 {
-        return self.buf + (if (self.buf < 26) @as(u8, 'A') else '2' - 26);
+    fn n_front_bits(self: *const Self) u3 {
+        // bit_off   n_front_bits
+        // 0         5
+        // 1         5
+        // 2         5
+        // 3         5
+        // 4         4
+        // 5         3
+        // 6         2
+        // 7         1
+        return if (self.bit_off <= 3) 5 else 7 - self.bit_off + 1;
+    }
+
+    fn front(self: *const Self, index: usize) u5 {
+        // bit_off   bits         shl   shr   front
+        // 0         0b11111000         3     0b11111
+        // 1         0b01111100         2     0b11111
+        // 2         0b00111110         1     0b11111
+        // 3         0b00011111   0     0     0b11111
+        // 4         0b00001111   1           0b11110
+        // 5         0b00000111   2           0b11100
+        // 6         0b00000011   3           0b11000
+        // 7         0b00000001   4           0b10000
+        const bits = self.buffer[index] & self.bitmask();
+        if (self.bit_off >= 4) return @truncate(u5, bits << (self.bit_off - 3));
+        return @truncate(u5, bits >> (3 - self.bit_off));
+    }
+
+    fn back(self: *const Self, index: usize, bits: u3) u5 {
+        if (bits == 0) return 0;
+        return @truncate(u5, self.buffer[index] >> (7 - bits + 1));
+    }
+
+    fn next_u5(self: *Self) ?u5 {
+        const front_index = self.index orelse return null;
+        const num_front_bits = self.n_front_bits();
+        const front_bits = self.front(front_index);
+
+        var back_bits: u5 = 0;
+        if (self.bit_off >= 3) {
+            self.bit_off -= 3;
+            const new_index = front_index + 1;
+            if (self.buffer.len > new_index) {
+                self.index = new_index;
+                back_bits = self.back(new_index, 5 - num_front_bits);
+            } else {
+                self.index = null;
+            }
+        } else {
+            self.bit_off += 5;
+        }
+
+        return front_bits | back_bits;
+    }
+
+    fn char(unencoded: u5) u8 {
+        return unencoded + (if (unencoded < 26) @as(u8, 'A') else '2' - 26);
+    }
+
+    pub fn next(self: *Self) ?u8 {
+        const unencoded = self.next_u5() orelse return null;
+        return char(unencoded);
     }
 };
+
+// TODO(rutgerbrf): simplify the code of the decoder
 
 pub const DecodeError = error{CorruptInputError};
 
@@ -89,17 +132,11 @@ pub fn decodedLen(enc_len: usize) usize {
 }
 
 pub fn encode(bs: []const u8, out: []u8) usize {
-    var e = Encoder{};
-    var i: usize = 0;
-    for (bs) |b| {
-        if (i >= out.len) break;
-        i += e.write(b, out[i..]);
+    var e = Encoder{ .buffer = bs, .index = 0, .bit_off = 0 };
+    for (out) |*b, i| {
+        b.* = e.next() orelse return i;
     }
-    if (e.out_off != 0 and i < out.len) {
-        out[i] = e.char();
-        i += 1;
-    }
-    return i; // amount of bytes processed
+    return out.len;
 }
 
 pub fn decode(ps: []const u8, out: []u8) DecodeError!usize {
