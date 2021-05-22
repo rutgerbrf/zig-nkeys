@@ -7,8 +7,26 @@ pub const Encoder = struct {
     index: ?usize,
     bit_off: u3,
 
-    fn bitmask(self: *const Self) u8 {
-        return @as(u8, 0b11111000) >> self.bit_off;
+    pub fn init(buffer: []const u8) Encoder {
+        return .{
+            .buffer = buffer,
+            .index = 0,
+            .bit_off = 0,
+        };
+    }
+
+    pub fn calcSize(source_len: usize) usize {
+        const source_len_bits = source_len * 8;
+        return source_len_bits / 5 + (if (source_len_bits % 5 > 0) @as(usize, 1) else 0);
+    }
+
+    pub fn encode(dest: []u8, source: []const u8) []const u8 {
+        const out_len = calcSize(source.len);
+        std.debug.assert(dest.len >= out_len);
+
+        var e = init(source);
+        for (dest) |*b| b.* = e.next() orelse unreachable;
+        return dest[0..out_len];
     }
 
     fn n_front_bits(self: *const Self) u3 {
@@ -34,7 +52,8 @@ pub const Encoder = struct {
         // 5         0b00000111   2           0b11100
         // 6         0b00000011   3           0b11000
         // 7         0b00000001   4           0b10000
-        const bits = self.buffer[index] & self.bitmask();
+        const bitmask = @as(u8, 0b11111000) >> self.bit_off;
+        const bits = self.buffer[index] & bitmask;
         if (self.bit_off >= 4) return @truncate(u5, bits << (self.bit_off - 3));
         return @truncate(u5, bits >> (3 - self.bit_off));
     }
@@ -66,10 +85,12 @@ pub const Encoder = struct {
         return front_bits | back_bits;
     }
 
+    // Returns the corresponding ASCII character for 5 bits of the input.
     fn char(unencoded: u5) u8 {
         return unencoded + (if (unencoded < 26) @as(u8, 'A') else '2' - 26);
     }
 
+    // Returns the next byte of the encoded buffer.
     pub fn next(self: *Self) ?u8 {
         const unencoded = self.next_u5() orelse return null;
         return char(unencoded);
@@ -121,22 +142,9 @@ pub const Decoder = struct {
     }
 };
 
-pub fn encodedLen(src_len: usize) usize {
-    const src_len_bits = src_len * 8;
-    return src_len_bits / 5 + (if (src_len_bits % 5 > 0) @as(usize, 1) else 0);
-}
-
 pub fn decodedLen(enc_len: usize) usize {
     const enc_len_bits = enc_len * 5;
     return enc_len_bits / 8;
-}
-
-pub fn encode(bs: []const u8, out: []u8) usize {
-    var e = Encoder{ .buffer = bs, .index = 0, .bit_off = 0 };
-    for (out) |*b, i| {
-        b.* = e.next() orelse return i;
-    }
-    return out.len;
 }
 
 pub fn decode(ps: []const u8, out: []u8) DecodeError!usize {

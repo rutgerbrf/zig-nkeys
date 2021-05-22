@@ -211,9 +211,9 @@ const binary_public_size = 1 + Ed25519.public_length + 2;
 // Two prefix bytes, two CRC bytes
 const binary_seed_size = 2 + Ed25519.seed_length + 2;
 
-pub const text_private_len = base32.encodedLen(binary_private_size);
-pub const text_public_len = base32.encodedLen(binary_public_size);
-pub const text_seed_len = base32.encodedLen(binary_seed_size);
+pub const text_private_len = base32.Encoder.calcSize(binary_private_size);
+pub const text_public_len = base32.Encoder.calcSize(binary_public_size);
+pub const text_seed_len = base32.Encoder.calcSize(binary_seed_size);
 
 pub const text_private = [text_private_len]u8;
 pub const text_public = [text_public_len]u8;
@@ -227,8 +227,8 @@ pub fn encodePrivate(key: *const [Ed25519.secret_length]u8) !text_private {
     return encode(1, key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, key);
 }
 
-fn EncodedKey(comptime prefix_len: usize, comptime data_len: usize) type {
-    return [base32.encodedLen(prefix_len + data_len + 2)]u8;
+fn encoded_key(comptime prefix_len: usize, comptime data_len: usize) type {
+    return [base32.Encoder.calcSize(prefix_len + data_len + 2)]u8;
 }
 
 fn encode(
@@ -236,7 +236,7 @@ fn encode(
     comptime data_len: usize,
     prefix: *const [prefix_len]u8,
     data: *const [data_len]u8,
-) !EncodedKey(prefix_len, data_len) {
+) !encoded_key(prefix_len, data_len) {
     var buf: [prefix_len + data_len + 2]u8 = undefined;
     defer wipeBytes(&buf);
 
@@ -246,8 +246,8 @@ fn encode(
     var checksum = crc16.make(buf[0..off]);
     mem.writeIntLittle(u16, buf[buf.len - 2 .. buf.len], checksum);
 
-    var text: EncodedKey(prefix_len, data_len) = undefined;
-    std.debug.assert(base32.encode(&buf, &text) == text.len);
+    var text: encoded_key(prefix_len, data_len) = undefined;
+    _ = base32.Encoder.encode(&text, &buf);
 
     return text;
 }
@@ -285,7 +285,7 @@ fn DecodedNKey(comptime prefix_len: usize, comptime data_len: usize) type {
 fn decode(
     comptime prefix_len: usize,
     comptime data_len: usize,
-    text: *const [base32.encodedLen(prefix_len + data_len + 2)]u8,
+    text: *const [base32.Encoder.calcSize(prefix_len + data_len + 2)]u8,
 ) !DecodedNKey(prefix_len, data_len) {
     var raw: [prefix_len + data_len + 2]u8 = undefined;
     defer wipeBytes(&raw);
