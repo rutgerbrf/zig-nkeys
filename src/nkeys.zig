@@ -325,8 +325,6 @@ pub fn isKeySectionBarrier(line: []const u8) bool {
 }
 
 const allowed_creds_section_chars_table: [256]bool = allowed: {
-    @setEvalBranchQuota(256);
-
     var table = [_]bool{false} ** 256;
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.=";
     for (chars) |char| table[char] = true;
