@@ -64,18 +64,8 @@ pub const Encoder = struct {
     /// | 6              | 0b11000     |
     /// | 7              | 0b10000     |
     fn frontBits(self: *const Self) ?u5 {
-        // bit_off   bitmask      shl   shr   frontBits
-        // 0         0b11111000         3     0b11111
-        // 1         0b01111100         2     0b11111
-        // 2         0b00111110         1     0b11111
-        // 3         0b00011111   0     0     0b11111
-        // 4         0b00001111   1           0b11110
-        // 5         0b00000111   2           0b11100
-        // 6         0b00000011   3           0b11000
-        // 7         0b00000001   4           0b10000
         const index = self.index orelse return null;
-        const bitmask = @as(u8, 0b11111000) >> self.bit_off;
-        const bits = self.buffer[index] & bitmask;
+        const bits = self.buffer[index];
         if (self.bit_off >= 4) return @truncate(u5, bits << (self.bit_off - 3));
         return @truncate(u5, bits >> (3 - self.bit_off));
     }
@@ -87,10 +77,10 @@ pub const Encoder = struct {
     /// | `bits` | `backBits` |
     /// |--------|------------|
     /// | 0      | 0b00000    |
-    /// | 1      | 0b10000    |
-    /// | 2      | 0b11000    |
-    /// | 3      | 0b11100    |
-    /// | 4      | 0b11100    |
+    /// | 1      | 0b00001    |
+    /// | 2      | 0b00011    |
+    /// | 3      | 0b00111    |
+    /// | 4      | 0b01110    |
     /// | 5      | 0b11101    |
     fn backBits(self: *const Self, bits: u3) u5 {
         std.debug.assert(bits <= 5);

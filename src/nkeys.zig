@@ -274,7 +274,7 @@ pub fn decodeSeed(text: *const text_seed) SeedDecodeError!DecodedSeed {
     defer decoded.wipe(); // gets copied
 
     var key_ty_prefix = decoded.prefix[0] & 0b11111000;
-    var entity_ty_prefix = (decoded.prefix[0] & 0b00000111) << 5 | ((decoded.prefix[1] & 0b11111000) >> 3);
+    var entity_ty_prefix = (decoded.prefix[0] << 5) | (decoded.prefix[1] >> 3);
 
     if (key_ty_prefix != @enumToInt(KeyTypePrefixByte.seed))
         return error.InvalidSeed;
@@ -328,7 +328,6 @@ const allowed_creds_section_chars_table: [256]bool = allowed: {
     var table = [_]bool{false} ** 256;
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.=";
     for (chars) |char| table[char] = true;
-
     break :allowed table;
 };
 
