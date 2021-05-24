@@ -95,7 +95,7 @@ pub const SeedKeyPair = struct {
         Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
-    pub fn asTextSeed(self: *const Self) text_seed {
+    pub fn textSeed(self: *const Self) text_seed {
         const full_prefix = &[_]u8{
             @enumToInt(KeyTypePrefixByte.seed) | (@enumToInt(self.prefix) >> 5),
             (@enumToInt(self.prefix) & 0b00011111) << 3,
@@ -104,22 +104,22 @@ pub const SeedKeyPair = struct {
         return encode(full_prefix.len, seed.len, full_prefix, seed);
     }
 
-    pub fn asTextPrivateKey(self: *const Self) text_private {
+    pub fn textPrivateKey(self: *const Self) text_private {
         return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
-    pub fn asTextPublicKey(self: *const Self) text_public {
+    pub fn textPublicKey(self: *const Self) text_public {
         return encode(1, self.kp.public_key.len, &[_]u8{@enumToInt(self.prefix)}, &self.kp.public_key);
     }
 
-    pub fn asPublicKey(self: *const Self) PublicKey {
+    pub fn intoPublicKey(self: *const Self) PublicKey {
         return PublicKey{
             .prefix = self.prefix,
             .key = self.kp.public_key,
         };
     }
 
-    pub fn asPrivateKey(self: *const Self) PrivateKey {
+    pub fn intoPrivateKey(self: *const Self) PrivateKey {
         return PrivateKey{ .kp = self.kp };
     }
 
@@ -153,7 +153,14 @@ pub const PublicKey = struct {
         };
     }
 
-    pub fn asTextPublicKey(self: *const Self) text_public {
+    pub fn fromRawPublicKey(
+        prefix: PublicPrefixByte,
+        raw_key: *const [Ed25519.public_length]u8,
+    ) Self {
+        return Self{ .prefix = prefix, .key = raw_key.* };
+    }
+
+    pub fn textPublicKey(self: *const Self) text_public {
         return encode(1, self.key.len, &[_]u8{@enumToInt(self.prefix)}, &self.key);
     }
 
@@ -184,21 +191,25 @@ pub const PrivateKey = struct {
         return PrivateKey{ .kp = Ed25519.KeyPair.fromSecretKey(decoded.data) };
     }
 
-    pub fn asSeedKeyPair(self: *const Self, prefix: PublicPrefixByte) SeedKeyPair {
+    pub fn fromRawPrivateKey(raw_key: *const [Ed25519.secret_length]u8) Self {
+        return Self{ .kp = Ed25519.KeyPair.fromSecretKey(raw_key.*) };
+    }
+
+    pub fn intoSeedKeyPair(self: *const Self, prefix: PublicPrefixByte) SeedKeyPair {
         return SeedKeyPair{
             .prefix = prefix,
             .kp = self.kp,
         };
     }
 
-    pub fn asPublicKey(self: *const Self, prefix: PublicPrefixByte) PublicKey {
+    pub fn intoPublicKey(self: *const Self, prefix: PublicPrefixByte) PublicKey {
         return PublicKey{
             .prefix = prefix,
             .key = self.kp.public_key,
         };
     }
 
-    pub fn asTextPrivateKey(self: *const Self) text_private {
+    pub fn textPrivateKey(self: *const Self) text_private {
         return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
@@ -409,7 +420,7 @@ pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair
 
 pub fn parseDecoratedUserNkey(contents: []const u8) (NoNkeySeedFoundError || NoNkeyUserSeedFoundError)!SeedKeyPair {
     var key = try parseDecoratedNkey(contents);
-    if (!mem.startsWith(u8, &key.asTextSeed(), "SU")) return error.NoNkeyUserSeedFound;
+    if (!mem.startsWith(u8, &key.textSeed(), "SU")) return error.NoNkeyUserSeedFound;
     defer key.wipe();
     return key;
 }
@@ -425,32 +436,27 @@ test {
     var key_pair = try SeedKeyPair.generate(PublicPrefixByte.server);
     defer key_pair.wipe();
 
-    var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.asTextSeed());
+    var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.textSeed());
     defer decoded_seed.wipe();
-    try testing.expect(isValidEncoding(&decoded_seed.asTextSeed()));
+    try testing.expect(isValidEncoding(&decoded_seed.textSeed()));
 
-    var pub_key_str_a = key_pair.asTextPublicKey();
+    var pub_key_str_a = key_pair.textPublicKey();
     defer wipeBytes(&pub_key_str_a);
-    var priv_key_str = key_pair.asTextPrivateKey();
+    var priv_key_str = key_pair.textPrivateKey();
     defer wipeBytes(&priv_key_str);
     try testing.expect(pub_key_str_a.len != 0);
     try testing.expect(priv_key_str.len != 0);
     try testing.expect(isValidEncoding(&pub_key_str_a));
     try testing.expect(isValidEncoding(&priv_key_str));
 
-    var pub_key = key_pair.asPublicKey();
+    var pub_key = key_pair.intoPublicKey();
     defer pub_key.wipe();
-    var pub_key_str_b = pub_key.asTextPublicKey();
+    var pub_key_str_b = pub_key.textPublicKey();
     defer wipeBytes(&pub_key_str_b);
     try testing.expectEqualSlices(u8, &pub_key_str_a, &pub_key_str_b);
 }
 
-test "encode" {
-    var raw_key: [32]u8 = undefined;
-    crypto.random.bytes(&raw_key);
-
-    //    encode(
-}
+// TODO(rutgerbrf): test decode (+bad), seed, account, user, operator, cluster, isValid*, from*, fromRaw*, wipe
 
 test "parse decorated JWT (bad)" {
     try testing.expectEqualStrings("foo", parseDecoratedJwt("foo"));
@@ -480,10 +486,10 @@ test "parse decorated seed and JWT" {
     const seed = "SUAGIEYODKBBTUMOB666Z5KA4FCWAZV7HWSGRHOD7MK6UM5IYLWLACH7DQ";
 
     var got_kp = try parseDecoratedUserNkey(creds);
-    try testing.expectEqualStrings(seed, &got_kp.asTextSeed());
+    try testing.expectEqualStrings(seed, &got_kp.textSeed());
 
     got_kp = try parseDecoratedNkey(creds);
-    try testing.expectEqualStrings(seed, &got_kp.asTextSeed());
+    try testing.expectEqualStrings(seed, &got_kp.textSeed());
 
     var got_jwt = parseDecoratedJwt(creds);
     try testing.expectEqualStrings(jwt, got_jwt);

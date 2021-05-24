@@ -149,10 +149,10 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
     } else {
         var kp = try nkeys.SeedKeyPair.generate(ty.?);
         defer kp.wipe();
-        try stdout.writeAll(&kp.asTextSeed());
+        try stdout.writeAll(&kp.textSeed());
         try stdout.writeAll("\n");
 
-        var public_key = kp.asTextPublicKey();
+        var public_key = kp.textPublicKey();
         if (pub_out) {
             try stdout.writeAll(&public_key);
             try stdout.writeAll("\n");
@@ -378,12 +378,12 @@ const PrefixKeyGenerator = struct {
 
             var kp = try nkeys.SeedKeyPair.generate(self.ty);
             defer kp.wipe();
-            var public_key = kp.asTextPublicKey();
+            var public_key = kp.textPublicKey();
             if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
 
             if (self.done.xchg(true, .SeqCst)) return; // another thread is already done
 
-            info("{s}", .{kp.asTextSeed()});
+            info("{s}", .{kp.textSeed()});
             info("{s}", .{public_key});
 
             return;
