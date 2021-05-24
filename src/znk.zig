@@ -231,16 +231,11 @@ pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !vo
     const content = file.?.readToEndAlloc(arena, std.math.maxInt(usize)) catch {
         fatal("could not read file to generate signature for", .{});
     };
-    var kp = switch (readKeyFile(arena, key.?) orelse fatal("could not find a valid key", .{})) {
-        .seed_key_pair => |kp| kp,
-        else => |*k| {
-            k.wipe();
-            fatal("key was provided but is not a seed", .{});
-        },
-    };
-    defer kp.wipe();
+    var nkey = readKeyFile(arena, key.?) orelse fatal("could not find a valid key", .{});
+    if (nkey == .public_key) fatal("key was provided but is not a seed or private key", .{});
+    defer nkey.wipe();
 
-    const sig = kp.sign(content) catch fatal("could not generate signature", .{});
+    const sig = nkey.sign(content) catch fatal("could not generate signature", .{});
     var encoded_sig = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(sig.len));
     _ = std.base64.standard.Encoder.encode(encoded_sig, &sig);
     try stdout.writeAll(encoded_sig);
@@ -427,23 +422,18 @@ fn toUpper(allocator: *Allocator, slice: []const u8) ![]u8 {
 }
 
 pub const Nkey = union(enum) {
-    seed_key_pair: nkeys.SeedKeyPair,
-    public_key: nkeys.PublicKey,
-
     const Self = @This();
 
-    pub fn publicKey(self: *const Self) nkeys.text_public {
-        return switch (self.*) {
-            .seed_key_pair => |*kp| kp.asTextPublicKey(),
-            .public_key => |*pk| pk.asTextPublicKey(),
-        };
-    }
+    seed_key_pair: nkeys.SeedKeyPair,
+    public_key: nkeys.PublicKey,
+    private_key: nkeys.PrivateKey,
 
-    pub fn intoPublicKey(self: *const Self) nkeys.PublicKey {
-        return switch (self.*) {
-            .seed_key_pair => |*kp| kp.asPublicKey(),
-            .public_key => |pk| pk,
-        };
+    pub fn wipe(self: *Self) void {
+        switch (self.*) {
+            .seed_key_pair => |*kp| kp.wipe(),
+            .public_key => |*pk| pk.wipe(),
+            .private_key => |*pk| pk.wipe(),
+        }
     }
 
     pub fn verify(
@@ -454,13 +444,18 @@ pub const Nkey = union(enum) {
         return switch (self.*) {
             .seed_key_pair => |*kp| try kp.verify(msg, sig),
             .public_key => |*pk| try pk.verify(msg, sig),
+            .private_key => |*pk| try pk.verify(msg, sig),
         };
     }
 
-    pub fn wipe(self: *Self) void {
+    pub fn sign(
+        self: *const Self,
+        msg: []const u8,
+    ) ![std.crypto.sign.Ed25519.signature_length]u8 {
         return switch (self.*) {
-            .seed_key_pair => |*kp| kp.wipe(),
-            .public_key => |*pk| pk.wipe(),
+            .seed_key_pair => |*kp| try kp.sign(msg),
+            .private_key => |*pk| try pk.sign(msg),
+            .public_key => return error.CantSign,
         };
     }
 
@@ -472,8 +467,13 @@ pub const Nkey = union(enum) {
                 if (text.len != nkeys.text_seed_len) return error.InvalidSeed;
                 return Self{ .seed_key_pair = try nkeys.SeedKeyPair.fromTextSeed(text[0..nkeys.text_seed_len]) };
             },
-            'P' => return error.InvalidEncoding, // unsupported for now
+            'P' => {
+                // It's a private key.
+                if (text.len != nkeys.text_private_len) return error.InvalidPrivateKey;
+                return Self{ .private_key = try nkeys.PrivateKey.fromTextPrivateKey(text[0..nkeys.text_private_len]) };
+            },
             else => {
+                // It should be a public key.
                 if (text.len != nkeys.text_public_len) return error.InvalidEncoding;
                 return Self{ .public_key = try nkeys.PublicKey.fromTextPublicKey(text[0..nkeys.text_public_len]) };
             },
