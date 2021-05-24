@@ -439,11 +439,27 @@ test {
 }
 
 test {
-    var creds_bytes = try std.fs.cwd().readFileAlloc(testing.allocator, "fixtures/test.creds", std.math.maxInt(usize));
-    defer testing.allocator.free(creds_bytes);
-    defer wipeBytes(creds_bytes);
+    const creds =
+        \\-----BEGIN NATS USER JWT-----
+        \\eyJ0eXAiOiJKV1QiLCJhbGciOiJlZDI1NTE5LW5rZXkifQ.eyJqdGkiOiJUWEg1TUxDNTdPTUJUQURYNUJNU0RLWkhSQUtXUFM0TkdHRFFPVlJXRzUyRFdaUlFFVERBIiwiaWF0IjoxNjIxNTgyOTU1LCJpc3MiOiJBQ1ZUQVZMQlFKTklQRjdNWFZWSlpZUFhaTkdFQUZMWVpTUjJSNVRZNk9ESjNSTTRYV0FDNUVFRiIsIm5hbWUiOiJ0ZXN0Iiwic3ViIjoiVUJHSlhLRkVWUlFEM05LM0lDRVc1Q0lDSzM1NkdESVZORkhaRUU0SzdMMkRYWTdORVNQVlFVNEwiLCJuYXRzIjp7InB1YiI6e30sInN1YiI6e30sInN1YnMiOi0xLCJkYXRhIjotMSwicGF5bG9hZCI6LTEsInR5cGUiOiJ1c2VyIiwidmVyc2lvbiI6Mn19.OhPLDZflyJ_keg2xBRDHZZhG5x_Qf_Yb61k9eHLs9zLRf0_ETwMd0PNZI_isuBhXYevobXHVoYA3oxvMVGlDCQ
+        \\------END NATS USER JWT------
+        \\
+        \\************************* IMPORTANT *************************
+        \\NKEY Seed printed below can be used to sign and prove identity.
+        \\NKEYs are sensitive and should be treated as secrets.
+        \\
+        \\-----BEGIN USER NKEY SEED-----
+        \\SUAGIEYODKBBTUMOB666Z5KA4FCWAZV7HWSGRHOD7MK6UM5IYLWLACH7DQ
+        \\------END USER NKEY SEED------
+        \\
+        \\*************************************************************
+    ;
+    const jwt = "eyJ0eXAiOiJKV1QiLCJhbGciOiJlZDI1NTE5LW5rZXkifQ.eyJqdGkiOiJUWEg1TUxDNTdPTUJUQURYNUJNU0RLWkhSQUtXUFM0TkdHRFFPVlJXRzUyRFdaUlFFVERBIiwiaWF0IjoxNjIxNTgyOTU1LCJpc3MiOiJBQ1ZUQVZMQlFKTklQRjdNWFZWSlpZUFhaTkdFQUZMWVpTUjJSNVRZNk9ESjNSTTRYV0FDNUVFRiIsIm5hbWUiOiJ0ZXN0Iiwic3ViIjoiVUJHSlhLRkVWUlFEM05LM0lDRVc1Q0lDSzM1NkdESVZORkhaRUU0SzdMMkRYWTdORVNQVlFVNEwiLCJuYXRzIjp7InB1YiI6e30sInN1YiI6e30sInN1YnMiOi0xLCJkYXRhIjotMSwicGF5bG9hZCI6LTEsInR5cGUiOiJ1c2VyIiwidmVyc2lvbiI6Mn19.OhPLDZflyJ_keg2xBRDHZZhG5x_Qf_Yb61k9eHLs9zLRf0_ETwMd0PNZI_isuBhXYevobXHVoYA3oxvMVGlDCQ";
+    const seed = "SUAGIEYODKBBTUMOB666Z5KA4FCWAZV7HWSGRHOD7MK6UM5IYLWLACH7DQ";
 
-    // TODO(rutgerbrf): validate the contents of the results of these functions
-    _ = try parseDecoratedUserNkey(creds_bytes);
-    _ = parseDecoratedJwt(creds_bytes);
+    var got_kp = try parseDecoratedUserNkey(creds);
+    try testing.expectEqualStrings(seed, &got_kp.seed);
+
+    var got_jwt = parseDecoratedJwt(creds);
+    try testing.expectEqualStrings(jwt, got_jwt);
 }
