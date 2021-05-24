@@ -1,4 +1,4 @@
-const Error = error{InvalidChecksum};
+pub const InvalidChecksumError = error{InvalidChecksum};
 
 const crc16tab: [256]u16 = tab: {
     @setEvalBranchQuota(10000);
@@ -36,6 +36,6 @@ pub fn make(data: []const u8) u16 {
 }
 
 // validate will check the calculated CRC16 checksum for data against the expected.
-pub fn validate(data: []const u8, expected: u16) !void {
+pub fn validate(data: []const u8, expected: u16) InvalidChecksumError!void {
     if (make(data) != expected) return error.InvalidChecksum;
 }

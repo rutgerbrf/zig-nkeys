@@ -147,7 +147,7 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
 
         try PrefixKeyGenerator.init(arena, ty.?, capitalized_prefix).generate();
     } else {
-        var kp = nkeys.SeedKeyPair.generate(ty.?) catch |e| fatal("could not generate key pair: {e}", .{e});
+        var kp = nkeys.SeedKeyPair.generate(ty.?);
         defer kp.wipe();
         try stdout.writeAll(&kp.seed);
         try stdout.writeAll("\n");
@@ -231,7 +231,7 @@ pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !vo
     const content = file.?.readToEndAlloc(arena, std.math.maxInt(usize)) catch {
         fatal("could not read file to generate signature for", .{});
     };
-    var kp = switch (readKeyFile(arena, key.?)) {
+    var kp = switch (readKeyFile(arena, key.?) orelse fatal("could not find a valid key", .{})) {
         .seed_key_pair => |kp| kp,
         else => |*k| {
             k.wipe();
@@ -339,7 +339,7 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
     const signature_b64 = sig.?.readToEndAlloc(arena, std.math.maxInt(usize)) catch {
         fatal("could not read signature", .{});
     };
-    var k = readKeyFile(arena, key.?);
+    var k = readKeyFile(arena, key.?) orelse fatal("could not find a valid key", .{});
     defer k.wipe();
 
     const trimmed_signature_b64 = mem.trim(u8, signature_b64, " \n\t\r");
@@ -381,7 +381,7 @@ const PrefixKeyGenerator = struct {
         while (true) {
             if (self.done.load(.SeqCst)) return;
 
-            var kp = nkeys.SeedKeyPair.generate(self.ty) catch |e| fatal("could not generate key pair: {e}", .{e});
+            var kp = nkeys.SeedKeyPair.generate(self.ty);
             defer kp.wipe();
             var public_key = kp.publicKey() catch |e| fatal("could not generate public key: {e}", .{e});
             if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
@@ -435,7 +435,7 @@ pub const Nkey = union(enum) {
     pub fn publicKey(self: *const Self) !nkeys.text_public {
         return switch (self.*) {
             .seed_key_pair => |*kp| try kp.publicKey(),
-            .public_key => |*pk| try pk.publicKey(),
+            .public_key => |*pk| pk.publicKey(),
         };
     }
 
@@ -481,20 +481,23 @@ pub const Nkey = union(enum) {
     }
 };
 
-pub fn readKeyFile(allocator: *Allocator, file: fs.File) Nkey {
+pub fn readKeyFile(allocator: *Allocator, file: fs.File) ?Nkey {
     var bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
+    defer {
+        for (bytes) |*b| b.* = 0;
+        allocator.free(bytes);
+    }
 
     var iterator = mem.split(bytes, "\n");
     while (iterator.next()) |line| {
         if (nkeys.isValidEncoding(line) and line.len == nkeys.text_seed_len) {
             var k = Nkey.fromText(line) catch continue;
             defer k.wipe();
-            allocator.free(bytes);
             return k;
         }
     }
 
-    fatal("could not find a valid key", .{});
+    return null;
 }
 
 test {
