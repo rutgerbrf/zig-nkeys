@@ -147,12 +147,12 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
 
         try PrefixKeyGenerator.init(arena, ty.?, capitalized_prefix).generate();
     } else {
-        var kp = nkeys.SeedKeyPair.generate(ty.?);
+        var kp = try nkeys.SeedKeyPair.generate(ty.?);
         defer kp.wipe();
-        try stdout.writeAll(&kp.seed);
+        try stdout.writeAll(&kp.asTextSeed());
         try stdout.writeAll("\n");
 
-        var public_key = kp.publicKey() catch |e| fatal("could not generate public key: {e}", .{e});
+        var public_key = kp.asTextPublicKey();
         if (pub_out) {
             try stdout.writeAll(&public_key);
             try stdout.writeAll("\n");
@@ -377,18 +377,18 @@ const PrefixKeyGenerator = struct {
         };
     }
 
-    fn generatePrivate(self: *Self) void {
+    fn generatePrivate(self: *Self) !void {
         while (true) {
             if (self.done.load(.SeqCst)) return;
 
-            var kp = nkeys.SeedKeyPair.generate(self.ty);
+            var kp = try nkeys.SeedKeyPair.generate(self.ty);
             defer kp.wipe();
-            var public_key = kp.publicKey() catch |e| fatal("could not generate public key: {e}", .{e});
+            var public_key = kp.asTextPublicKey();
             if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
 
             if (self.done.xchg(true, .SeqCst)) return; // another thread is already done
 
-            info("{s}", .{kp.seed});
+            info("{s}", .{kp.asTextSeed()});
             info("{s}", .{public_key});
 
             return;
@@ -432,16 +432,16 @@ pub const Nkey = union(enum) {
 
     const Self = @This();
 
-    pub fn publicKey(self: *const Self) !nkeys.text_public {
+    pub fn publicKey(self: *const Self) nkeys.text_public {
         return switch (self.*) {
-            .seed_key_pair => |*kp| try kp.publicKey(),
-            .public_key => |*pk| pk.publicKey(),
+            .seed_key_pair => |*kp| kp.asTextPublicKey(),
+            .public_key => |*pk| pk.asTextPublicKey(),
         };
     }
 
-    pub fn intoPublicKey(self: *const Self) !nkeys.PublicKey {
+    pub fn intoPublicKey(self: *const Self) nkeys.PublicKey {
         return switch (self.*) {
-            .seed_key_pair => |*kp| try kp.intoPublicKey(),
+            .seed_key_pair => |*kp| kp.asPublicKey(),
             .public_key => |pk| pk,
         };
     }
