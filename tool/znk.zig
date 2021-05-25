@@ -500,7 +500,7 @@ pub fn readKeyFile(allocator: *Allocator, file: fs.File) ?Nkey {
     return null;
 }
 
-test {
+test "reference all declarations" {
     testing.refAllDecls(@This());
     testing.refAllDecls(Nkey);
     testing.refAllDecls(PrefixKeyGenerator);

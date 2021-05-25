@@ -455,7 +455,7 @@ fn wipeBytes(bs: []u8) void {
     for (bs) |*b| b.* = 0;
 }
 
-test {
+test "reference all delcarations" {
     testing.refAllDecls(@This());
     testing.refAllDecls(Role);
     testing.refAllDecls(SeedKeyPair);
@@ -463,7 +463,7 @@ test {
     testing.refAllDecls(PrivateKey);
 }
 
-test {
+test "key conversions" {
     var key_pair = try SeedKeyPair.generate(.server);
     var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.seedText());
     try testing.expect(isValidEncoding(&decoded_seed.seedText()));
