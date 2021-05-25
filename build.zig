@@ -13,7 +13,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     const version = "0.1.0-dev";
 
-    const lib = b.addStaticLibrary("zats", "src/nkeys.zig");
+    const lib = b.addStaticLibrary("nkeys", "src/nkeys.zig");
     lib.setBuildMode(mode);
     lib.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
     lib.install();
@@ -30,7 +30,7 @@ pub fn build(b: *std.build.Builder) !void {
     znk_tests.addPackagePath("nkeys", "src/nkeys.zig");
     znk_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
-    const znk_test_step = b.step("znk-test", "Run znk tests");
+    const znk_test_step = b.step("test-znk", "Run znk tests");
     znk_test_step.dependOn(&znk_tests.step);
 
     const znk = b.addExecutable("znk", "tool/znk.zig");
@@ -50,6 +50,6 @@ pub fn build(b: *std.build.Builder) !void {
         znk_run_cmd.addArgs(args);
     }
 
-    const znk_run_step = b.step("znk-run", "Run znk");
+    const znk_run_step = b.step("run-znk", "Run znk");
     znk_run_step.dependOn(&znk_run_cmd.step);
 }

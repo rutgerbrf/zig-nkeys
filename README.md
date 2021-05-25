@@ -14,8 +14,8 @@ Zig master works at the time of writing.
 Use `zig build` to build the library.
 Use `zig build znk` to build the `znk` tool.
 
-The `znk` tool can be run by using `zig build znk-run`.
+The `znk` tool can be run by using `zig build run-znk`.
 
 Tests for the library can be run by using `zig build test`.
-Tests for the `znk` tool can be run by using `zig build znk-test`.
+Tests for the `znk` tool can be run by using `zig build test-znk`.
 
