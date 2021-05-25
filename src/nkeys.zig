@@ -139,18 +139,11 @@ pub const SeedKeyPair = struct {
         return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed.*) };
     }
 
-    pub fn sign(
-        self: *const Self,
-        msg: []const u8,
-    ) SignError![Ed25519.signature_length]u8 {
+    pub fn sign(self: *const Self, msg: []const u8) SignError![Ed25519.signature_length]u8 {
         return Ed25519.sign(msg, self.kp, null);
     }
 
-    pub fn verify(
-        self: *const Self,
-        msg: []const u8,
-        sig: [Ed25519.signature_length]u8,
-    ) InvalidSignatureError!void {
+    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
         Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
@@ -204,10 +197,7 @@ pub const PublicKey = struct {
         };
     }
 
-    pub fn fromRawPublicKey(
-        role: Role,
-        raw_key: *const [Ed25519.public_length]u8,
-    ) Self {
+    pub fn fromRawPublicKey(role: Role, raw_key: *const [Ed25519.public_length]u8) Self {
         return Self{ .role = role, .key = raw_key.* };
     }
 
@@ -215,11 +205,7 @@ pub const PublicKey = struct {
         return encode(1, self.key.len, &.{self.role.publicPrefixByte()}, &self.key);
     }
 
-    pub fn verify(
-        self: *const Self,
-        msg: []const u8,
-        sig: [Ed25519.signature_length]u8,
-    ) InvalidSignatureError!void {
+    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
         Ed25519.verify(sig, msg, self.key) catch return error.InvalidSignature;
     }
 
@@ -264,18 +250,11 @@ pub const PrivateKey = struct {
         return encode(1, self.kp.secret_key.len, &.{prefix_byte_private}, &self.kp.secret_key);
     }
 
-    pub fn sign(
-        self: *const Self,
-        msg: []const u8,
-    ) SignError![Ed25519.signature_length]u8 {
+    pub fn sign(self: *const Self, msg: []const u8) SignError![Ed25519.signature_length]u8 {
         return Ed25519.sign(msg, self.kp, null);
     }
 
-    pub fn verify(
-        self: *const Self,
-        msg: []const u8,
-        sig: [Ed25519.signature_length]u8,
-    ) InvalidSignatureError!void {
+    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
         Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
