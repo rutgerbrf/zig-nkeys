@@ -22,28 +22,34 @@ pub fn build(b: *std.build.Builder) !void {
     lib_tests.setBuildMode(mode);
     lib_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
-    var znk_tests = b.addTest("src/znk.zig");
-    znk_tests.setBuildMode(mode);
-    znk_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
-
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&lib_tests.step);
+
+    var znk_tests = b.addTest("tool/znk.zig");
+    znk_tests.setBuildMode(mode);
+    znk_tests.addPackagePath("nkeys", "src/nkeys.zig");
+    znk_tests.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
     const znk_test_step = b.step("znk-test", "Run znk tests");
     znk_test_step.dependOn(&znk_tests.step);
 
-    const exe = b.addExecutable("znk", "src/znk.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
-    exe.install();
+    const znk = b.addExecutable("znk", "tool/znk.zig");
+    znk.setTarget(target);
+    znk.setBuildMode(mode);
+    znk.addPackagePath("nkeys", "src/nkeys.zig");
+    znk.addBuildOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
+    const znk_install = b.addInstallArtifact(znk);
+
+    const znk_step = b.step("znk", "Build only znk");
+    znk_step.dependOn(&znk_install.step);
+
+    const znk_run_cmd = znk.run();
+    znk_run_cmd.step.dependOn(&znk_install.step);
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        znk_run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run znk");
-    run_step.dependOn(&run_cmd.step);
+    const znk_run_step = b.step("znk-run", "Run znk");
+    znk_run_step.dependOn(&znk_run_cmd.step);
 }

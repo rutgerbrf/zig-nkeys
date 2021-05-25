@@ -6,7 +6,7 @@ const builtin = std.builtin;
 const fs = std.fs;
 const io = std.io;
 const mem = std.mem;
-const nkeys = @import("nkeys.zig");
+const nkeys = @import("nkeys");
 const process = std.process;
 const testing = std.testing;
 
