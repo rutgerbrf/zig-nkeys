@@ -20,25 +20,54 @@ pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypt
 pub const SignError = crypto.errors.IdentityElementError || crypto.errors.WeakPublicKeyError || crypto.errors.KeyMismatchError;
 
 pub const KeyTypePrefixByte = enum(u8) {
+    const Self = @This();
+
     seed = 18 << 3, // S
     private = 15 << 3, // P
-    unknown = 23 << 3, // U
+
+    fn char(self: Self) u8 {
+        switch (self) {
+            .seed => 'S',
+            .private => 'P',
+        }
+    }
+
+    fn fromChar(c: u8) InvalidPrefixByteError!Self {
+        return switch (c) {
+            'S' => .seed,
+            'P' => .private,
+            else => error.InvalidPrefixByte,
+        };
+    }
 };
 
 pub const PublicPrefixByte = enum(u8) {
+    const Self = @This();
+
     account = 0, // A
     cluster = 2 << 3, // C
     operator = 14 << 3, // O
     server = 13 << 3, // N
     user = 20 << 3, // U
 
-    fn fromU8(b: u8) error{InvalidPrefixByte}!PublicPrefixByte {
+    fn fromU8(b: u8) InvalidPrefixByteError!PublicPrefixByte {
         return switch (b) {
             @enumToInt(PublicPrefixByte.server) => .server,
             @enumToInt(PublicPrefixByte.cluster) => .cluster,
             @enumToInt(PublicPrefixByte.operator) => .operator,
             @enumToInt(PublicPrefixByte.account) => .account,
             @enumToInt(PublicPrefixByte.user) => .user,
+            else => error.InvalidPrefixByte,
+        };
+    }
+
+    fn fromChar(c: u8) InvalidPrefixByteError!Self {
+        return switch (c) {
+            'A' => .account,
+            'C' => .cluster,
+            'O' => .operator,
+            'N' => .server,
+            'U' => .user,
             else => error.InvalidPrefixByte,
         };
     }
@@ -105,11 +134,11 @@ pub const SeedKeyPair = struct {
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
+        return encode(1, self.kp.secret_key.len, &.{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.kp.public_key.len, &[_]u8{@enumToInt(self.prefix)}, &self.kp.public_key);
+        return encode(1, self.kp.public_key.len, &.{@enumToInt(self.prefix)}, &self.kp.public_key);
     }
 
     pub fn intoPublicKey(self: *const Self) PublicKey {
@@ -161,7 +190,7 @@ pub const PublicKey = struct {
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.key.len, &[_]u8{@enumToInt(self.prefix)}, &self.key);
+        return encode(1, self.key.len, &.{@enumToInt(self.prefix)}, &self.key);
     }
 
     pub fn verify(
@@ -210,7 +239,7 @@ pub const PrivateKey = struct {
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
+        return encode(1, self.kp.secret_key.len, &.{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
     pub fn sign(
@@ -499,54 +528,28 @@ test "public key" {
     }
 }
 
-test "account" {
-    const kp = try SeedKeyPair.generate(.account);
-    _ = try SeedKeyPair.fromTextSeed(&kp.seedText());
+test "different key types" {
+    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
+        const prefix = @field(PublicPrefixByte, field.name);
 
-    const pub_key_str = kp.publicKeyText();
-    try testing.expect(pub_key_str[0] == 'A');
-    try testing.expect(isValidPublicKey(&pub_key_str, .account));
+        const kp = try SeedKeyPair.generate(prefix);
+        _ = try SeedKeyPair.fromTextSeed(&kp.seedText());
 
-    const priv_key_str = kp.privateKeyText();
-    try testing.expect(priv_key_str[0] == 'P');
-    try testing.expect(isValidPrivateKey(&priv_key_str));
+        const pub_key_str = kp.publicKeyText();
+        const got_pub_key_prefix = try PublicPrefixByte.fromChar(pub_key_str[0]);
+        try testing.expect(got_pub_key_prefix == prefix);
+        try testing.expect(isValidPublicKey(&pub_key_str, prefix));
 
-    const data = "Hello, world!";
-    const sig = try kp.sign(data);
-    try testing.expect(sig.len == Ed25519.signature_length);
-    try kp.verify(data, sig);
-}
+        const priv_key_str = kp.privateKeyText();
+        const got_priv_key_prefix = try KeyTypePrefixByte.fromChar(priv_key_str[0]);
+        try testing.expect(got_priv_key_prefix == .private);
+        try testing.expect(isValidPrivateKey(&priv_key_str));
 
-test "cluster" {
-    const kp = try SeedKeyPair.generate(.cluster);
-
-    const pub_key_str = kp.publicKeyText();
-    try testing.expect(pub_key_str[0] == 'C');
-    try testing.expect(isValidPublicKey(&pub_key_str, .cluster));
-}
-
-test "operator" {
-    const kp = try SeedKeyPair.generate(.operator);
-
-    const pub_key_str = kp.publicKeyText();
-    try testing.expect(pub_key_str[0] == 'O');
-    try testing.expect(isValidPublicKey(&pub_key_str, .operator));
-}
-
-test "server" {
-    const kp = try SeedKeyPair.generate(.server);
-
-    const pub_key_str = kp.publicKeyText();
-    try testing.expect(pub_key_str[0] == 'N');
-    try testing.expect(isValidPublicKey(&pub_key_str, .server));
-}
-
-test "user" {
-    const kp = try SeedKeyPair.generate(.user);
-
-    const pub_key_str = kp.publicKeyText();
-    try testing.expect(pub_key_str[0] == 'U');
-    try testing.expect(isValidPublicKey(&pub_key_str, .user));
+        const data = "Hello, world!";
+        const sig = try kp.sign(data);
+        try testing.expect(sig.len == Ed25519.signature_length);
+        try kp.verify(data, sig);
+    }
 }
 
 test "validation" {
@@ -600,7 +603,6 @@ test "from seed" {
     try kp2.verify(data, sig);
 }
 
-// TODO(rutgerbrf): give test a better name
 test "from public key" {
     const kp = try SeedKeyPair.generate(.user);
 
@@ -654,7 +656,41 @@ test "from private key" {
     try testing.expectError(error.InvalidSignature, pk.verify(data, sig2));
 }
 
-// TODO(rutgerbrf): bad decode, wipe, sign, (public/private/seed) verify
+test "bad decode" {
+    const kp = try SeedKeyPair.fromTextSeed("SAAHPQF3GOP4IP5SHKHCNBOHD5TMGSW4QQL6RTZAPEEYOQ2NRBIAKCCLQA");
+
+    var bad_seed = kp.seedText();
+    bad_seed[1] = 'S';
+    try testing.expectError(error.InvalidChecksum, SeedKeyPair.fromTextSeed(&bad_seed));
+
+    var bad_pub_key = kp.publicKeyText();
+    bad_pub_key[bad_pub_key.len - 1] = 'O';
+    bad_pub_key[bad_pub_key.len - 2] = 'O';
+    try testing.expectError(error.InvalidChecksum, PublicKey.fromTextPublicKey(&bad_pub_key));
+
+    var bad_priv_key = kp.privateKeyText();
+    bad_priv_key[bad_priv_key.len - 1] = 'O';
+    bad_priv_key[bad_priv_key.len - 2] = 'O';
+    try testing.expectError(error.InvalidChecksum, PrivateKey.fromTextPrivateKey(&bad_priv_key));
+}
+
+test "wipe" {
+    const kp = try SeedKeyPair.generate(.account);
+    const pub_key = kp.intoPublicKey();
+    const priv_key = kp.intoPrivateKey();
+
+    var kp_clone = kp;
+    kp_clone.wipe();
+    try testing.expect(!std.meta.eql(kp_clone.kp, kp.kp));
+
+    var pub_key_clone = pub_key;
+    pub_key_clone.wipe();
+    try testing.expect(!std.meta.eql(pub_key_clone.key, pub_key.key));
+
+    var priv_key_clone = priv_key;
+    priv_key_clone.wipe();
+    try testing.expect(!std.meta.eql(priv_key_clone.kp, priv_key.kp));
+}
 
 test "parse decorated JWT (bad)" {
     try testing.expectEqualStrings("foo", parseDecoratedJwt("foo"));

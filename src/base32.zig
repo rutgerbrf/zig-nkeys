@@ -132,7 +132,7 @@ pub const Encoder = struct {
     }
 };
 
-pub const DecodeError = error{CorruptInputError};
+pub const DecodeError = error{CorruptInput};
 
 pub const Decoder = struct {
     const Self = @This();
@@ -178,7 +178,7 @@ pub const Decoder = struct {
             // '2' -> 26
             return @truncate(u5, c - @as(u8, '2') + 26);
         } else {
-            return error.CorruptInputError;
+            return error.CorruptInput;
         }
     }
 
