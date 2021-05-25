@@ -26,10 +26,10 @@ pub const KeyTypePrefixByte = enum(u8) {
     private = 15 << 3, // P
 
     fn char(self: Self) u8 {
-        switch (self) {
+        return switch (self) {
             .seed => 'S',
             .private => 'P',
-        }
+        };
     }
 
     fn fromChar(c: u8) InvalidPrefixByteError!Self {
@@ -58,6 +58,16 @@ pub const PublicPrefixByte = enum(u8) {
             @enumToInt(PublicPrefixByte.account) => .account,
             @enumToInt(PublicPrefixByte.user) => .user,
             else => error.InvalidPrefixByte,
+        };
+    }
+
+    fn char(self: Self) u8 {
+        return switch (self) {
+            .account => 'A',
+            .cluster => 'C',
+            .operator => 'O',
+            .server => 'N',
+            .user => 'U',
         };
     }
 
@@ -464,6 +474,8 @@ pub fn parseDecoratedUserNkey(contents: []const u8) (NoNkeySeedFoundError || NoN
 
 test {
     testing.refAllDecls(@This());
+    testing.refAllDecls(KeyTypePrefixByte);
+    testing.refAllDecls(PublicPrefixByte);
     testing.refAllDecls(SeedKeyPair);
     testing.refAllDecls(PublicKey);
     testing.refAllDecls(PrivateKey);
