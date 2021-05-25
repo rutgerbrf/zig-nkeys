@@ -95,7 +95,7 @@ pub const SeedKeyPair = struct {
         Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
-    pub fn textSeed(self: *const Self) text_seed {
+    pub fn seedText(self: *const Self) text_seed {
         const full_prefix = &[_]u8{
             @enumToInt(KeyTypePrefixByte.seed) | (@enumToInt(self.prefix) >> 5),
             (@enumToInt(self.prefix) & 0b00011111) << 3,
@@ -104,11 +104,11 @@ pub const SeedKeyPair = struct {
         return encode(full_prefix.len, seed.len, full_prefix, seed);
     }
 
-    pub fn textPrivateKey(self: *const Self) text_private {
+    pub fn privateKeyText(self: *const Self) text_private {
         return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
-    pub fn textPublicKey(self: *const Self) text_public {
+    pub fn publicKeyText(self: *const Self) text_public {
         return encode(1, self.kp.public_key.len, &[_]u8{@enumToInt(self.prefix)}, &self.kp.public_key);
     }
 
@@ -160,7 +160,7 @@ pub const PublicKey = struct {
         return Self{ .prefix = prefix, .key = raw_key.* };
     }
 
-    pub fn textPublicKey(self: *const Self) text_public {
+    pub fn publicKeyText(self: *const Self) text_public {
         return encode(1, self.key.len, &[_]u8{@enumToInt(self.prefix)}, &self.key);
     }
 
@@ -209,7 +209,7 @@ pub const PrivateKey = struct {
         };
     }
 
-    pub fn textPrivateKey(self: *const Self) text_private {
+    pub fn privateKeyText(self: *const Self) text_private {
         return encode(1, self.kp.secret_key.len, &[_]u8{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
     }
 
@@ -326,17 +326,25 @@ pub fn isValidEncoding(text: []const u8) bool {
     return made_crc == got_crc;
 }
 
-pub fn isValidSeed(text: *const text_seed) bool {
-    var res = SeedKeyPair.fromTextSeed(text) catch return false;
-    res.wipe();
-    return true;
+pub fn isValidSeed(text: []const u8, with_type: ?PublicPrefixByte) bool {
+    if (text.len < text_seed_len) return false;
+    var res = SeedKeyPair.fromTextSeed(text[0..text_seed_len]) catch return false;
+    defer res.wipe();
+    return if (with_type) |ty| res.prefix == ty else true;
 }
 
-pub fn isValidPublicKey(text: *const text_public, with_type: ?PublicPrefixByte) bool {
-    var res = decode(1, Ed25519.public_length, text) catch return false;
+pub fn isValidPublicKey(text: []const u8, with_type: ?PublicPrefixByte) bool {
+    if (text.len < text_public_len) return false;
+    var res = PublicKey.fromTextPublicKey(text[0..text_public_len]) catch return false;
     defer res.wipe();
-    const public = PublicPrefixByte.fromU8(res.data[0]) catch return false;
-    return if (with_type) |ty| public == ty else true;
+    return if (with_type) |ty| res.prefix == ty else true;
+}
+
+pub fn isValidPrivateKey(text: []const u8) bool {
+    if (text.len < text_private_len) return false;
+    var res = PrivateKey.fromTextPrivateKey(text[0..text_private_len]) catch return false;
+    res.wipe();
+    return true;
 }
 
 // `line` must not contain CR or LF characters.
@@ -420,7 +428,7 @@ pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair
 
 pub fn parseDecoratedUserNkey(contents: []const u8) (NoNkeySeedFoundError || NoNkeyUserSeedFoundError)!SeedKeyPair {
     var key = try parseDecoratedNkey(contents);
-    if (!mem.startsWith(u8, &key.textSeed(), "SU")) return error.NoNkeyUserSeedFound;
+    if (!mem.startsWith(u8, &key.seedText(), "SU")) return error.NoNkeyUserSeedFound;
     defer key.wipe();
     return key;
 }
@@ -434,29 +442,219 @@ test {
 
 test {
     var key_pair = try SeedKeyPair.generate(PublicPrefixByte.server);
-    defer key_pair.wipe();
+    var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.seedText());
+    try testing.expect(isValidEncoding(&decoded_seed.seedText()));
 
-    var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.textSeed());
-    defer decoded_seed.wipe();
-    try testing.expect(isValidEncoding(&decoded_seed.textSeed()));
-
-    var pub_key_str_a = key_pair.textPublicKey();
-    defer wipeBytes(&pub_key_str_a);
-    var priv_key_str = key_pair.textPrivateKey();
-    defer wipeBytes(&priv_key_str);
+    var pub_key_str_a = key_pair.publicKeyText();
+    var priv_key_str_a = key_pair.privateKeyText();
     try testing.expect(pub_key_str_a.len != 0);
-    try testing.expect(priv_key_str.len != 0);
+    try testing.expect(priv_key_str_a.len != 0);
     try testing.expect(isValidEncoding(&pub_key_str_a));
-    try testing.expect(isValidEncoding(&priv_key_str));
+    try testing.expect(isValidEncoding(&priv_key_str_a));
 
     var pub_key = key_pair.intoPublicKey();
-    defer pub_key.wipe();
-    var pub_key_str_b = pub_key.textPublicKey();
-    defer wipeBytes(&pub_key_str_b);
-    try testing.expectEqualSlices(u8, &pub_key_str_a, &pub_key_str_b);
+    var pub_key_str_b = pub_key.publicKeyText();
+    try testing.expectEqualStrings(&pub_key_str_a, &pub_key_str_b);
+
+    var priv_key = key_pair.intoPrivateKey();
+    var priv_key_str_b = priv_key.privateKeyText();
+    try testing.expectEqualStrings(&priv_key_str_a, &priv_key_str_b);
 }
 
-// TODO(rutgerbrf): test decode (+bad), seed, account, user, operator, cluster, isValid*, from*, fromRaw*, wipe
+test "decode" {
+    const kp = try SeedKeyPair.generate(.account);
+    const seed_text = kp.seedText();
+    const pub_key_text = kp.publicKeyText();
+    const priv_key_text = kp.privateKeyText();
+
+    _ = try SeedKeyPair.fromTextSeed(&seed_text);
+    _ = try PublicKey.fromTextPublicKey(&pub_key_text);
+    _ = try PrivateKey.fromTextPrivateKey(&priv_key_text);
+
+    try testing.expectError(error.InvalidChecksum, PublicKey.fromTextPublicKey(seed_text[0..text_public_len]));
+    try testing.expectError(error.InvalidChecksum, SeedKeyPair.fromTextSeed(priv_key_text[0..text_seed_len]));
+}
+
+test "seed" {
+    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
+        const prefix = @field(PublicPrefixByte, field.name);
+        const kp = try SeedKeyPair.generate(prefix);
+        const decoded = try SeedKeyPair.fromTextSeed(&kp.seedText());
+        if (decoded.prefix != prefix) {
+            std.debug.print("expected prefix {}, found prefix {}\n", .{ prefix, decoded.prefix });
+            return error.TestUnexpectedError;
+        }
+    }
+}
+
+test "public key" {
+    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
+        const prefix = @field(PublicPrefixByte, field.name);
+        const kp = try SeedKeyPair.generate(prefix);
+        const decoded_pub_key = try PublicKey.fromTextPublicKey(&kp.publicKeyText());
+        if (decoded_pub_key.prefix != prefix) {
+            std.debug.print("expected prefix {}, found prefix {}\n", .{ prefix, decoded_pub_key.prefix });
+            return error.TestUnexpectedError;
+        }
+    }
+}
+
+test "account" {
+    const kp = try SeedKeyPair.generate(.account);
+    _ = try SeedKeyPair.fromTextSeed(&kp.seedText());
+
+    const pub_key_str = kp.publicKeyText();
+    try testing.expect(pub_key_str[0] == 'A');
+    try testing.expect(isValidPublicKey(&pub_key_str, .account));
+
+    const priv_key_str = kp.privateKeyText();
+    try testing.expect(priv_key_str[0] == 'P');
+    try testing.expect(isValidPrivateKey(&priv_key_str));
+
+    const data = "Hello, world!";
+    const sig = try kp.sign(data);
+    try testing.expect(sig.len == Ed25519.signature_length);
+    try kp.verify(data, sig);
+}
+
+test "cluster" {
+    const kp = try SeedKeyPair.generate(.cluster);
+
+    const pub_key_str = kp.publicKeyText();
+    try testing.expect(pub_key_str[0] == 'C');
+    try testing.expect(isValidPublicKey(&pub_key_str, .cluster));
+}
+
+test "operator" {
+    const kp = try SeedKeyPair.generate(.operator);
+
+    const pub_key_str = kp.publicKeyText();
+    try testing.expect(pub_key_str[0] == 'O');
+    try testing.expect(isValidPublicKey(&pub_key_str, .operator));
+}
+
+test "server" {
+    const kp = try SeedKeyPair.generate(.server);
+
+    const pub_key_str = kp.publicKeyText();
+    try testing.expect(pub_key_str[0] == 'N');
+    try testing.expect(isValidPublicKey(&pub_key_str, .server));
+}
+
+test "user" {
+    const kp = try SeedKeyPair.generate(.user);
+
+    const pub_key_str = kp.publicKeyText();
+    try testing.expect(pub_key_str[0] == 'U');
+    try testing.expect(isValidPublicKey(&pub_key_str, .user));
+}
+
+test "validation" {
+    const prefixes = @typeInfo(PublicPrefixByte).Enum.fields;
+    inline for (prefixes) |field, i| {
+        const prefix = @field(PublicPrefixByte, field.name);
+        const next_prefix = next: {
+            const next_field_i = if (i == prefixes.len - 1) 0 else i + 1;
+            std.debug.assert(next_field_i != i);
+            break :next @field(PublicPrefixByte, prefixes[next_field_i].name);
+        };
+        const kp = try SeedKeyPair.generate(prefix);
+
+        const seed_str = kp.seedText();
+        const pub_key_str = kp.publicKeyText();
+        const priv_key_str = kp.privateKeyText();
+
+        try testing.expect(isValidSeed(&seed_str, prefix));
+        try testing.expect(isValidSeed(&seed_str, null));
+        try testing.expect(isValidPublicKey(&pub_key_str, null));
+        try testing.expect(isValidPublicKey(&pub_key_str, prefix));
+        try testing.expect(isValidPrivateKey(&priv_key_str));
+
+        try testing.expect(!isValidSeed(&seed_str, next_prefix));
+        try testing.expect(!isValidSeed(&pub_key_str, null));
+        try testing.expect(!isValidSeed(&priv_key_str, null));
+        try testing.expect(!isValidPublicKey(&pub_key_str, next_prefix));
+        try testing.expect(!isValidPublicKey(&seed_str, null));
+        try testing.expect(!isValidPublicKey(&priv_key_str, null));
+        try testing.expect(!isValidPrivateKey(&seed_str));
+        try testing.expect(!isValidPrivateKey(&pub_key_str));
+    }
+
+    try testing.expect(!isValidSeed("seed", null));
+    try testing.expect(!isValidPublicKey("public key", null));
+    try testing.expect(!isValidPrivateKey("private key"));
+}
+
+test "from seed" {
+    const kp = try SeedKeyPair.generate(.account);
+    const kp_from_raw = try SeedKeyPair.fromRawSeed(kp.prefix, kp.kp.secret_key[0..Ed25519.seed_length]);
+    try testing.expect(std.meta.eql(kp, kp_from_raw));
+
+    const data = "Hello, World!";
+    const sig = try kp.sign(data);
+
+    const seed = kp.seedText();
+    try testing.expect(mem.startsWith(u8, &seed, "SA"));
+
+    const kp2 = try SeedKeyPair.fromTextSeed(&seed);
+    try kp2.verify(data, sig);
+}
+
+// TODO(rutgerbrf): give test a better name
+test "from public key" {
+    const kp = try SeedKeyPair.generate(.user);
+
+    const pk_text = kp.publicKeyText();
+    const pk_text_clone = kp.publicKeyText();
+    try testing.expectEqualStrings(&pk_text, &pk_text_clone);
+
+    const pk = try PublicKey.fromTextPublicKey(&pk_text);
+    const pk_text_clone_2 = pk.publicKeyText();
+    try testing.expect(std.meta.eql(pk, kp.intoPublicKey()));
+    try testing.expect(std.meta.eql(pk, PublicKey.fromRawPublicKey(kp.prefix, &kp.kp.public_key)));
+    try testing.expectEqualStrings(&pk_text, &pk_text_clone_2);
+
+    const data = "Hello, world!";
+
+    const sig = try kp.sign(data);
+    try pk.verify(data, sig);
+
+    // Create another user to sign and make sure verification fails
+    const kp2 = try SeedKeyPair.generate(.user);
+    const sig2 = try kp2.sign(data);
+
+    try testing.expectError(error.InvalidSignature, pk.verify(data, sig2));
+}
+
+test "from private key" {
+    const kp = try SeedKeyPair.generate(.account);
+
+    const pk_text = kp.privateKeyText();
+    const pk_text_clone = kp.privateKeyText();
+    try testing.expectEqualStrings(&pk_text, &pk_text_clone);
+
+    const pk = try PrivateKey.fromTextPrivateKey(&pk_text);
+    const pk_text_clone_2 = pk.privateKeyText();
+    try testing.expect(std.meta.eql(pk, kp.intoPrivateKey()));
+    try testing.expect(std.meta.eql(kp, pk.intoSeedKeyPair(.account)));
+    try testing.expect(std.meta.eql(pk, PrivateKey.fromRawPrivateKey(&kp.kp.secret_key)));
+    try testing.expectEqualStrings(&pk_text, &pk_text_clone_2);
+
+    const data = "Hello, World!";
+
+    const sig0 = try kp.sign(data);
+    const sig1 = try pk.sign(data);
+    try testing.expectEqualSlices(u8, &sig0, &sig1);
+    try pk.verify(data, sig0);
+    try kp.verify(data, sig1);
+
+    const kp2 = try SeedKeyPair.generate(.account);
+    const sig2 = try kp2.sign(data);
+
+    try testing.expectError(error.InvalidSignature, pk.verify(data, sig2));
+}
+
+// TODO(rutgerbrf): bad decode, wipe, sign, (public/private/seed) verify
 
 test "parse decorated JWT (bad)" {
     try testing.expectEqualStrings("foo", parseDecoratedJwt("foo"));
@@ -486,10 +684,10 @@ test "parse decorated seed and JWT" {
     const seed = "SUAGIEYODKBBTUMOB666Z5KA4FCWAZV7HWSGRHOD7MK6UM5IYLWLACH7DQ";
 
     var got_kp = try parseDecoratedUserNkey(creds);
-    try testing.expectEqualStrings(seed, &got_kp.textSeed());
+    try testing.expectEqualStrings(seed, &got_kp.seedText());
 
     got_kp = try parseDecoratedNkey(creds);
-    try testing.expectEqualStrings(seed, &got_kp.textSeed());
+    try testing.expectEqualStrings(seed, &got_kp.seedText());
 
     var got_jwt = parseDecoratedJwt(creds);
     try testing.expectEqualStrings(jwt, got_jwt);
