@@ -25,14 +25,14 @@ pub const KeyTypePrefixByte = enum(u8) {
     seed = 18 << 3, // S
     private = 15 << 3, // P
 
-    fn char(self: Self) u8 {
+    pub fn char(self: Self) u8 {
         return switch (self) {
             .seed => 'S',
             .private => 'P',
         };
     }
 
-    fn fromChar(c: u8) InvalidPrefixByteError!Self {
+    pub fn fromChar(c: u8) InvalidPrefixByteError!Self {
         return switch (c) {
             'S' => .seed,
             'P' => .private,
@@ -50,7 +50,7 @@ pub const PublicPrefixByte = enum(u8) {
     server = 13 << 3, // N
     user = 20 << 3, // U
 
-    fn fromU8(b: u8) InvalidPrefixByteError!PublicPrefixByte {
+    pub fn fromU8(b: u8) InvalidPrefixByteError!PublicPrefixByte {
         return switch (b) {
             @enumToInt(PublicPrefixByte.server) => .server,
             @enumToInt(PublicPrefixByte.cluster) => .cluster,
@@ -61,7 +61,7 @@ pub const PublicPrefixByte = enum(u8) {
         };
     }
 
-    fn char(self: Self) u8 {
+    pub fn char(self: Self) u8 {
         return switch (self) {
             .account => 'A',
             .cluster => 'C',
@@ -71,7 +71,7 @@ pub const PublicPrefixByte = enum(u8) {
         };
     }
 
-    fn fromChar(c: u8) InvalidPrefixByteError!Self {
+    pub fn fromChar(c: u8) InvalidPrefixByteError!Self {
         return switch (c) {
             'A' => .account,
             'C' => .cluster,
@@ -82,6 +82,21 @@ pub const PublicPrefixByte = enum(u8) {
         };
     }
 };
+
+// One prefix byte, two CRC bytes
+const binary_private_size = 1 + Ed25519.secret_length + 2;
+// One prefix byte, two CRC bytes
+const binary_public_size = 1 + Ed25519.public_length + 2;
+// Two prefix bytes, two CRC bytes
+const binary_seed_size = 2 + Ed25519.seed_length + 2;
+
+pub const text_private_len = base32.Encoder.calcSize(binary_private_size);
+pub const text_public_len = base32.Encoder.calcSize(binary_public_size);
+pub const text_seed_len = base32.Encoder.calcSize(binary_seed_size);
+
+pub const text_private = [text_private_len]u8;
+pub const text_public = [text_public_len]u8;
+pub const text_seed = [text_seed_len]u8;
 
 pub const SeedKeyPair = struct {
     const Self = @This();
@@ -167,15 +182,6 @@ pub const SeedKeyPair = struct {
         wipeKeyPair(&self.kp);
     }
 };
-
-fn wipeKeyPair(kp: *Ed25519.KeyPair) void {
-    wipeBytes(&kp.public_key);
-    wipeBytes(&kp.secret_key);
-}
-
-fn wipeBytes(bs: []u8) void {
-    for (bs) |*b| b.* = 0;
-}
 
 pub const PublicKey = struct {
     const Self = @This();
@@ -271,21 +277,6 @@ pub const PrivateKey = struct {
         wipeKeyPair(&self.kp);
     }
 };
-
-// One prefix byte, two CRC bytes
-const binary_private_size = 1 + Ed25519.secret_length + 2;
-// One prefix byte, two CRC bytes
-const binary_public_size = 1 + Ed25519.public_length + 2;
-// Two prefix bytes, two CRC bytes
-const binary_seed_size = 2 + Ed25519.seed_length + 2;
-
-pub const text_private_len = base32.Encoder.calcSize(binary_private_size);
-pub const text_public_len = base32.Encoder.calcSize(binary_public_size);
-pub const text_seed_len = base32.Encoder.calcSize(binary_seed_size);
-
-pub const text_private = [text_private_len]u8;
-pub const text_public = [text_public_len]u8;
-pub const text_seed = [text_seed_len]u8;
 
 fn encoded_key(comptime prefix_len: usize, comptime data_len: usize) type {
     return [base32.Encoder.calcSize(prefix_len + data_len + 2)]u8;
@@ -429,7 +420,27 @@ pub fn parseDecoratedJwt(contents: []const u8) []const u8 {
     return findKeySection(contents, &line_it) orelse return contents;
 }
 
-fn validNkey(text: []const u8) bool {
+pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair {
+    var line_it = mem.split(contents, "\n");
+    var current_off: usize = 0;
+    var seed: ?[]const u8 = null;
+    if (findKeySection(contents, &line_it) != null)
+        seed = findKeySection(contents, &line_it);
+    if (seed == null)
+        seed = findNkey(contents) orelse return error.NoNkeySeedFound;
+    if (!isValidCredsNkey(seed.?))
+        return error.NoNkeySeedFound;
+    return SeedKeyPair.fromTextSeed(seed.?[0..text_seed_len]) catch return error.NoNkeySeedFound;
+}
+
+pub fn parseDecoratedUserNkey(contents: []const u8) (NoNkeySeedFoundError || NoNkeyUserSeedFoundError)!SeedKeyPair {
+    var key = try parseDecoratedNkey(contents);
+    if (!mem.startsWith(u8, &key.seedText(), "SU")) return error.NoNkeyUserSeedFound;
+    defer key.wipe();
+    return key;
+}
+
+fn isValidCredsNkey(text: []const u8) bool {
     const valid_prefix =
         mem.startsWith(u8, text, "SO") or
         mem.startsWith(u8, text, "SA") or
@@ -444,7 +455,7 @@ fn findNkey(text: []const u8) ?[]const u8 {
     while (line_it.next()) |line| {
         for (line) |c, i| {
             if (!ascii.isSpace(c)) {
-                if (validNkey(line[i..])) return line[i..];
+                if (isValidCredsNkey(line[i..])) return line[i..];
                 break;
             }
         }
@@ -452,24 +463,13 @@ fn findNkey(text: []const u8) ?[]const u8 {
     return null;
 }
 
-pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair {
-    var line_it = mem.split(contents, "\n");
-    var current_off: usize = 0;
-    var seed: ?[]const u8 = null;
-    if (findKeySection(contents, &line_it) != null)
-        seed = findKeySection(contents, &line_it);
-    if (seed == null)
-        seed = findNkey(contents) orelse return error.NoNkeySeedFound;
-    if (!validNkey(seed.?))
-        return error.NoNkeySeedFound;
-    return SeedKeyPair.fromTextSeed(seed.?[0..text_seed_len]) catch return error.NoNkeySeedFound;
+fn wipeKeyPair(kp: *Ed25519.KeyPair) void {
+    wipeBytes(&kp.public_key);
+    wipeBytes(&kp.secret_key);
 }
 
-pub fn parseDecoratedUserNkey(contents: []const u8) (NoNkeySeedFoundError || NoNkeyUserSeedFoundError)!SeedKeyPair {
-    var key = try parseDecoratedNkey(contents);
-    if (!mem.startsWith(u8, &key.seedText(), "SU")) return error.NoNkeyUserSeedFound;
-    defer key.wipe();
-    return key;
+fn wipeBytes(bs: []u8) void {
+    for (bs) |*b| b.* = 0;
 }
 
 test {
