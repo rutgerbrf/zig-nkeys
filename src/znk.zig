@@ -74,9 +74,9 @@ pub fn mainArgs(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !v
 }
 
 const usage_gen =
-    \\Usage: znk gen [options] <type>
+    \\Usage: znk gen [options] <role>
     \\
-    \\Supported Types:
+    \\Supported Roles:
     \\
     \\  account
     \\  cluster
@@ -98,7 +98,7 @@ const usage_gen =
 pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
     const stdout = io.getStdOut();
 
-    var ty: ?nkeys.PublicPrefixByte = null;
+    var role: ?nkeys.Role = null;
     var pub_out: bool = false;
     var prefix: ?[]const u8 = null;
 
@@ -120,34 +120,34 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
             } else {
                 fatal("unrecognized parameter: '{s}'", .{arg});
             }
-        } else if (ty != null) {
-            fatal("more than one type to generate provided", .{});
+        } else if (role != null) {
+            fatal("more than one role to generate for provided", .{});
         } else if (mem.eql(u8, arg, "account")) {
-            ty = .account;
+            role = .account;
         } else if (mem.eql(u8, arg, "cluster")) {
-            ty = .cluster;
+            role = .cluster;
         } else if (mem.eql(u8, arg, "operator")) {
-            ty = .operator;
+            role = .operator;
         } else if (mem.eql(u8, arg, "server")) {
-            ty = .server;
+            role = .server;
         } else if (mem.eql(u8, arg, "user")) {
-            ty = .user;
+            role = .user;
         } else {
             fatal("unrecognized extra parameter: '{s}'", .{arg});
         }
     }
 
-    if (ty == null) {
+    if (role == null) {
         info("{s}", .{usage_gen});
-        fatal("no type to generate seed for provided", .{});
+        fatal("no role to generate seed for provided", .{});
     }
 
     if (prefix != null) {
         const capitalized_prefix = try toUpper(arena, prefix.?);
 
-        try PrefixKeyGenerator.init(arena, ty.?, capitalized_prefix).generate();
+        try PrefixKeyGenerator.init(arena, role.?, capitalized_prefix).generate();
     } else {
-        var kp = try nkeys.SeedKeyPair.generate(ty.?);
+        var kp = try nkeys.SeedKeyPair.generate(role.?);
         defer kp.wipe();
         try stdout.writeAll(&kp.seedText());
         try stdout.writeAll("\n");
@@ -356,16 +356,16 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
 }
 
 const PrefixKeyGenerator = struct {
-    ty: nkeys.PublicPrefixByte,
+    role: nkeys.Role,
     prefix: []const u8,
     allocator: *Allocator,
     done: std.atomic.Bool,
 
     const Self = @This();
 
-    pub fn init(allocator: *Allocator, ty: nkeys.PublicPrefixByte, prefix: []const u8) Self {
+    pub fn init(allocator: *Allocator, role: nkeys.Role, prefix: []const u8) Self {
         return .{
-            .ty = ty,
+            .role = role,
             .prefix = prefix,
             .allocator = allocator,
             .done = std.atomic.Bool.init(false),
@@ -376,7 +376,7 @@ const PrefixKeyGenerator = struct {
         while (true) {
             if (self.done.load(.SeqCst)) return;
 
-            var kp = try nkeys.SeedKeyPair.generate(self.ty);
+            var kp = try nkeys.SeedKeyPair.generate(self.role);
             defer kp.wipe();
             var public_key = kp.publicKeyText();
             if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;

@@ -19,67 +19,72 @@ pub const SeedDecodeError = DecodeError || InvalidSeedError || crypto.errors.Ide
 pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypto.errors.IdentityElementError;
 pub const SignError = crypto.errors.IdentityElementError || crypto.errors.WeakPublicKeyError || crypto.errors.KeyMismatchError;
 
-pub const KeyTypePrefixByte = enum(u8) {
+pub const prefix_byte_account = 0; // A
+pub const prefix_byte_cluster = 2 << 3; // C
+pub const prefix_byte_operator = 14 << 3; // O
+pub const prefix_byte_private = 15 << 3; // P
+pub const prefix_byte_seed = 18 << 3; // S
+pub const prefix_byte_server = 13 << 3; // N
+pub const prefix_byte_user = 20 << 3; // U
+
+pub fn prefixByteLetter(prefix_byte: u8) ?u8 {
+    return switch (prefix_byte) {
+        prefix_byte_account => 'A',
+        prefix_byte_cluster => 'C',
+        prefix_byte_operator => 'O',
+        prefix_byte_private => 'P',
+        prefix_byte_seed => 'S',
+        prefix_byte_server => 'N',
+        prefix_byte_user => 'U',
+        else => null,
+    };
+}
+
+pub fn prefixByteFromLetter(letter: u8) ?u8 {
+    return switch (letter) {
+        'A' => prefix_byte_account,
+        'C' => prefix_byte_cluster,
+        'O' => prefix_byte_operator,
+        'P' => prefix_byte_private,
+        'S' => prefix_byte_seed,
+        'N' => prefix_byte_server,
+        'U' => prefix_byte_user,
+        else => null,
+    };
+}
+
+pub const Role = enum(u8) {
     const Self = @This();
 
-    seed = 18 << 3, // S
-    private = 15 << 3, // P
+    account,
+    cluster,
+    operator,
+    server,
+    user,
 
-    pub fn char(self: Self) u8 {
-        return switch (self) {
-            .seed => 'S',
-            .private => 'P',
-        };
-    }
-
-    pub fn fromChar(c: u8) InvalidPrefixByteError!Self {
-        return switch (c) {
-            'S' => .seed,
-            'P' => .private,
-            else => error.InvalidPrefixByte,
-        };
-    }
-};
-
-pub const PublicPrefixByte = enum(u8) {
-    const Self = @This();
-
-    account = 0, // A
-    cluster = 2 << 3, // C
-    operator = 14 << 3, // O
-    server = 13 << 3, // N
-    user = 20 << 3, // U
-
-    pub fn fromU8(b: u8) InvalidPrefixByteError!PublicPrefixByte {
+    pub fn fromPublicPrefixByte(b: u8) ?Self {
         return switch (b) {
-            @enumToInt(PublicPrefixByte.server) => .server,
-            @enumToInt(PublicPrefixByte.cluster) => .cluster,
-            @enumToInt(PublicPrefixByte.operator) => .operator,
-            @enumToInt(PublicPrefixByte.account) => .account,
-            @enumToInt(PublicPrefixByte.user) => .user,
-            else => error.InvalidPrefixByte,
+            prefix_byte_account => .account,
+            prefix_byte_cluster => .cluster,
+            prefix_byte_operator => .operator,
+            prefix_byte_server => .server,
+            prefix_byte_user => .user,
+            else => null,
         };
     }
 
-    pub fn char(self: Self) u8 {
+    pub fn publicPrefixByte(self: Self) u8 {
         return switch (self) {
-            .account => 'A',
-            .cluster => 'C',
-            .operator => 'O',
-            .server => 'N',
-            .user => 'U',
+            .account => prefix_byte_account,
+            .cluster => prefix_byte_cluster,
+            .operator => prefix_byte_operator,
+            .server => prefix_byte_server,
+            .user => prefix_byte_user,
         };
     }
 
-    pub fn fromChar(c: u8) InvalidPrefixByteError!Self {
-        return switch (c) {
-            'A' => .account,
-            'C' => .cluster,
-            'O' => .operator,
-            'N' => .server,
-            'U' => .user,
-            else => error.InvalidPrefixByte,
-        };
+    pub fn letter(self: Self) u8 {
+        return prefixByteLetter(self.publicPrefixByte()) orelse unreachable;
     }
 };
 
@@ -101,14 +106,14 @@ pub const text_seed = [text_seed_len]u8;
 pub const SeedKeyPair = struct {
     const Self = @This();
 
-    prefix: PublicPrefixByte,
+    role: Role,
     kp: Ed25519.KeyPair,
 
-    pub fn generate(prefix: PublicPrefixByte) crypto.errors.IdentityElementError!Self {
+    pub fn generate(role: Role) crypto.errors.IdentityElementError!Self {
         var raw_seed: [Ed25519.seed_length]u8 = undefined;
         crypto.random.bytes(&raw_seed);
         defer wipeBytes(&raw_seed);
-        return Self{ .prefix = prefix, .kp = try Ed25519.KeyPair.create(raw_seed) };
+        return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed) };
     }
 
     pub fn fromTextSeed(text: *const text_seed) SeedDecodeError!Self {
@@ -116,22 +121,22 @@ pub const SeedKeyPair = struct {
         defer decoded.wipe(); // gets copied
 
         var key_ty_prefix = decoded.prefix[0] & 0b11111000;
-        var entity_ty_prefix = (decoded.prefix[0] << 5) | (decoded.prefix[1] >> 3);
+        var role_prefix = (decoded.prefix[0] << 5) | (decoded.prefix[1] >> 3);
 
-        if (key_ty_prefix != @enumToInt(KeyTypePrefixByte.seed))
+        if (key_ty_prefix != prefix_byte_seed)
             return error.InvalidSeed;
 
         return Self{
-            .prefix = try PublicPrefixByte.fromU8(entity_ty_prefix),
+            .role = Role.fromPublicPrefixByte(role_prefix) orelse return error.InvalidPrefixByte,
             .kp = try Ed25519.KeyPair.create(decoded.data),
         };
     }
 
     pub fn fromRawSeed(
-        prefix: PublicPrefixByte,
+        role: Role,
         raw_seed: *const [Ed25519.seed_length]u8,
     ) crypto.errors.IdentityElementError!Self {
-        return Self{ .prefix = prefix, .kp = try Ed25519.KeyPair.create(raw_seed.*) };
+        return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed.*) };
     }
 
     pub fn sign(
@@ -150,25 +155,26 @@ pub const SeedKeyPair = struct {
     }
 
     pub fn seedText(self: *const Self) text_seed {
+        const public_prefix = self.role.publicPrefixByte();
         const full_prefix = &[_]u8{
-            @enumToInt(KeyTypePrefixByte.seed) | (@enumToInt(self.prefix) >> 5),
-            (@enumToInt(self.prefix) & 0b00011111) << 3,
+            prefix_byte_seed | (public_prefix >> 5),
+            (public_prefix & 0b00011111) << 3,
         };
         const seed = self.kp.secret_key[0..Ed25519.seed_length];
         return encode(full_prefix.len, seed.len, full_prefix, seed);
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &.{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
+        return encode(1, self.kp.secret_key.len, &.{prefix_byte_private}, &self.kp.secret_key);
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.kp.public_key.len, &.{@enumToInt(self.prefix)}, &self.kp.public_key);
+        return encode(1, self.kp.public_key.len, &.{self.role.publicPrefixByte()}, &self.kp.public_key);
     }
 
     pub fn intoPublicKey(self: *const Self) PublicKey {
         return PublicKey{
-            .prefix = self.prefix,
+            .role = self.role,
             .key = self.kp.public_key,
         };
     }
@@ -178,7 +184,7 @@ pub const SeedKeyPair = struct {
     }
 
     pub fn wipe(self: *Self) void {
-        self.prefix = .account;
+        self.role = .account;
         wipeKeyPair(&self.kp);
     }
 };
@@ -186,27 +192,27 @@ pub const SeedKeyPair = struct {
 pub const PublicKey = struct {
     const Self = @This();
 
-    prefix: PublicPrefixByte,
+    role: Role,
     key: [Ed25519.public_length]u8,
 
     pub fn fromTextPublicKey(text: *const text_public) DecodeError!Self {
         var decoded = try decode(1, Ed25519.public_length, text);
         defer decoded.wipe(); // gets copied
         return PublicKey{
-            .prefix = try PublicPrefixByte.fromU8(decoded.prefix[0]),
+            .role = Role.fromPublicPrefixByte(decoded.prefix[0]) orelse return error.InvalidPrefixByte,
             .key = decoded.data,
         };
     }
 
     pub fn fromRawPublicKey(
-        prefix: PublicPrefixByte,
+        role: Role,
         raw_key: *const [Ed25519.public_length]u8,
     ) Self {
-        return Self{ .prefix = prefix, .key = raw_key.* };
+        return Self{ .role = role, .key = raw_key.* };
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.key.len, &.{@enumToInt(self.prefix)}, &self.key);
+        return encode(1, self.key.len, &.{self.role.publicPrefixByte()}, &self.key);
     }
 
     pub fn verify(
@@ -218,7 +224,7 @@ pub const PublicKey = struct {
     }
 
     pub fn wipe(self: *Self) void {
-        self.prefix = .account;
+        self.role = .account;
         wipeBytes(&self.key);
     }
 };
@@ -231,7 +237,7 @@ pub const PrivateKey = struct {
     pub fn fromTextPrivateKey(text: *const text_private) PrivateKeyDecodeError!Self {
         var decoded = try decode(1, Ed25519.secret_length, text);
         defer decoded.wipe(); // gets copied
-        if (decoded.prefix[0] != @enumToInt(KeyTypePrefixByte.private))
+        if (decoded.prefix[0] != prefix_byte_private)
             return error.InvalidPrivateKey;
         return PrivateKey{ .kp = Ed25519.KeyPair.fromSecretKey(decoded.data) };
     }
@@ -240,22 +246,22 @@ pub const PrivateKey = struct {
         return Self{ .kp = Ed25519.KeyPair.fromSecretKey(raw_key.*) };
     }
 
-    pub fn intoSeedKeyPair(self: *const Self, prefix: PublicPrefixByte) SeedKeyPair {
+    pub fn intoSeedKeyPair(self: *const Self, role: Role) SeedKeyPair {
         return SeedKeyPair{
-            .prefix = prefix,
+            .role = role,
             .kp = self.kp,
         };
     }
 
-    pub fn intoPublicKey(self: *const Self, prefix: PublicPrefixByte) PublicKey {
+    pub fn intoPublicKey(self: *const Self, role: Role) PublicKey {
         return PublicKey{
-            .prefix = prefix,
+            .role = role,
             .key = self.kp.public_key,
         };
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &.{@enumToInt(KeyTypePrefixByte.private)}, &self.kp.secret_key);
+        return encode(1, self.kp.secret_key.len, &.{prefix_byte_private}, &self.kp.secret_key);
     }
 
     pub fn sign(
@@ -311,7 +317,7 @@ fn DecodedNkey(comptime prefix_len: usize, comptime data_len: usize) type {
         data: [data_len]u8,
 
         pub fn wipe(self: *Self) void {
-            self.prefix[0] = @enumToInt(PublicPrefixByte.account);
+            self.prefix[0] = Role.account.publicPrefixByte();
             wipeBytes(&self.data);
         }
     };
@@ -356,18 +362,18 @@ pub fn isValidEncoding(text: []const u8) bool {
     return made_crc == got_crc;
 }
 
-pub fn isValidSeed(text: []const u8, with_type: ?PublicPrefixByte) bool {
+pub fn isValidSeed(text: []const u8, with_role: ?Role) bool {
     if (text.len < text_seed_len) return false;
     var res = SeedKeyPair.fromTextSeed(text[0..text_seed_len]) catch return false;
     defer res.wipe();
-    return if (with_type) |ty| res.prefix == ty else true;
+    return if (with_role) |role| res.role == role else true;
 }
 
-pub fn isValidPublicKey(text: []const u8, with_type: ?PublicPrefixByte) bool {
+pub fn isValidPublicKey(text: []const u8, with_role: ?Role) bool {
     if (text.len < text_public_len) return false;
     var res = PublicKey.fromTextPublicKey(text[0..text_public_len]) catch return false;
     defer res.wipe();
-    return if (with_type) |ty| res.prefix == ty else true;
+    return if (with_role) |role| res.role == role else true;
 }
 
 pub fn isValidPrivateKey(text: []const u8) bool {
@@ -474,15 +480,14 @@ fn wipeBytes(bs: []u8) void {
 
 test {
     testing.refAllDecls(@This());
-    testing.refAllDecls(KeyTypePrefixByte);
-    testing.refAllDecls(PublicPrefixByte);
+    testing.refAllDecls(Role);
     testing.refAllDecls(SeedKeyPair);
     testing.refAllDecls(PublicKey);
     testing.refAllDecls(PrivateKey);
 }
 
 test {
-    var key_pair = try SeedKeyPair.generate(PublicPrefixByte.server);
+    var key_pair = try SeedKeyPair.generate(.server);
     var decoded_seed = try SeedKeyPair.fromTextSeed(&key_pair.seedText());
     try testing.expect(isValidEncoding(&decoded_seed.seedText()));
 
@@ -517,44 +522,42 @@ test "decode" {
 }
 
 test "seed" {
-    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
-        const prefix = @field(PublicPrefixByte, field.name);
-        const kp = try SeedKeyPair.generate(prefix);
+    inline for (@typeInfo(Role).Enum.fields) |field| {
+        const role = @field(Role, field.name);
+        const kp = try SeedKeyPair.generate(role);
         const decoded = try SeedKeyPair.fromTextSeed(&kp.seedText());
-        if (decoded.prefix != prefix) {
-            std.debug.print("expected prefix {}, found prefix {}\n", .{ prefix, decoded.prefix });
+        if (decoded.role != role) {
+            std.debug.print("expected role {}, found role {}\n", .{ role, decoded.role });
             return error.TestUnexpectedError;
         }
     }
 }
 
 test "public key" {
-    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
-        const prefix = @field(PublicPrefixByte, field.name);
-        const kp = try SeedKeyPair.generate(prefix);
+    inline for (@typeInfo(Role).Enum.fields) |field| {
+        const role = @field(Role, field.name);
+        const kp = try SeedKeyPair.generate(role);
         const decoded_pub_key = try PublicKey.fromTextPublicKey(&kp.publicKeyText());
-        if (decoded_pub_key.prefix != prefix) {
-            std.debug.print("expected prefix {}, found prefix {}\n", .{ prefix, decoded_pub_key.prefix });
+        if (decoded_pub_key.role != role) {
+            std.debug.print("expected role {}, found role {}\n", .{ role, decoded_pub_key.role });
             return error.TestUnexpectedError;
         }
     }
 }
 
 test "different key types" {
-    inline for (@typeInfo(PublicPrefixByte).Enum.fields) |field| {
-        const prefix = @field(PublicPrefixByte, field.name);
+    inline for (@typeInfo(Role).Enum.fields) |field| {
+        const role = @field(Role, field.name);
 
-        const kp = try SeedKeyPair.generate(prefix);
+        const kp = try SeedKeyPair.generate(role);
         _ = try SeedKeyPair.fromTextSeed(&kp.seedText());
 
         const pub_key_str = kp.publicKeyText();
-        const got_pub_key_prefix = try PublicPrefixByte.fromChar(pub_key_str[0]);
-        try testing.expect(got_pub_key_prefix == prefix);
-        try testing.expect(isValidPublicKey(&pub_key_str, prefix));
+        try testing.expect(pub_key_str[0] == role.letter());
+        try testing.expect(isValidPublicKey(&pub_key_str, role));
 
         const priv_key_str = kp.privateKeyText();
-        const got_priv_key_prefix = try KeyTypePrefixByte.fromChar(priv_key_str[0]);
-        try testing.expect(got_priv_key_prefix == .private);
+        try testing.expect(priv_key_str[0] == 'P');
         try testing.expect(isValidPrivateKey(&priv_key_str));
 
         const data = "Hello, world!";
@@ -565,30 +568,30 @@ test "different key types" {
 }
 
 test "validation" {
-    const prefixes = @typeInfo(PublicPrefixByte).Enum.fields;
-    inline for (prefixes) |field, i| {
-        const prefix = @field(PublicPrefixByte, field.name);
-        const next_prefix = next: {
-            const next_field_i = if (i == prefixes.len - 1) 0 else i + 1;
+    const roles = @typeInfo(Role).Enum.fields;
+    inline for (roles) |field, i| {
+        const role = @field(Role, field.name);
+        const next_role = next: {
+            const next_field_i = if (i == roles.len - 1) 0 else i + 1;
             std.debug.assert(next_field_i != i);
-            break :next @field(PublicPrefixByte, prefixes[next_field_i].name);
+            break :next @field(Role, roles[next_field_i].name);
         };
-        const kp = try SeedKeyPair.generate(prefix);
+        const kp = try SeedKeyPair.generate(role);
 
         const seed_str = kp.seedText();
         const pub_key_str = kp.publicKeyText();
         const priv_key_str = kp.privateKeyText();
 
-        try testing.expect(isValidSeed(&seed_str, prefix));
+        try testing.expect(isValidSeed(&seed_str, role));
         try testing.expect(isValidSeed(&seed_str, null));
         try testing.expect(isValidPublicKey(&pub_key_str, null));
-        try testing.expect(isValidPublicKey(&pub_key_str, prefix));
+        try testing.expect(isValidPublicKey(&pub_key_str, role));
         try testing.expect(isValidPrivateKey(&priv_key_str));
 
-        try testing.expect(!isValidSeed(&seed_str, next_prefix));
+        try testing.expect(!isValidSeed(&seed_str, next_role));
         try testing.expect(!isValidSeed(&pub_key_str, null));
         try testing.expect(!isValidSeed(&priv_key_str, null));
-        try testing.expect(!isValidPublicKey(&pub_key_str, next_prefix));
+        try testing.expect(!isValidPublicKey(&pub_key_str, next_role));
         try testing.expect(!isValidPublicKey(&seed_str, null));
         try testing.expect(!isValidPublicKey(&priv_key_str, null));
         try testing.expect(!isValidPrivateKey(&seed_str));
@@ -602,7 +605,7 @@ test "validation" {
 
 test "from seed" {
     const kp = try SeedKeyPair.generate(.account);
-    const kp_from_raw = try SeedKeyPair.fromRawSeed(kp.prefix, kp.kp.secret_key[0..Ed25519.seed_length]);
+    const kp_from_raw = try SeedKeyPair.fromRawSeed(kp.role, kp.kp.secret_key[0..Ed25519.seed_length]);
     try testing.expect(std.meta.eql(kp, kp_from_raw));
 
     const data = "Hello, World!";
@@ -625,7 +628,7 @@ test "from public key" {
     const pk = try PublicKey.fromTextPublicKey(&pk_text);
     const pk_text_clone_2 = pk.publicKeyText();
     try testing.expect(std.meta.eql(pk, kp.intoPublicKey()));
-    try testing.expect(std.meta.eql(pk, PublicKey.fromRawPublicKey(kp.prefix, &kp.kp.public_key)));
+    try testing.expect(std.meta.eql(pk, PublicKey.fromRawPublicKey(kp.role, &kp.kp.public_key)));
     try testing.expectEqualStrings(&pk_text, &pk_text_clone_2);
 
     const data = "Hello, world!";
