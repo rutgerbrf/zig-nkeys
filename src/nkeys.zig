@@ -27,7 +27,7 @@ pub const prefix_byte_seed = 18 << 3; // S
 pub const prefix_byte_server = 13 << 3; // N
 pub const prefix_byte_user = 20 << 3; // U
 
-pub fn prefixByteLetter(prefix_byte: u8) ?u8 {
+pub fn prefixByteToLetter(prefix_byte: u8) ?u8 {
     return switch (prefix_byte) {
         prefix_byte_account => 'A',
         prefix_byte_cluster => 'C',
@@ -84,7 +84,7 @@ pub const Role = enum(u8) {
     }
 
     pub fn letter(self: Self) u8 {
-        return prefixByteLetter(self.publicPrefixByte()) orelse unreachable;
+        return prefixByteToLetter(self.publicPrefixByte()) orelse unreachable;
     }
 };
 
@@ -384,8 +384,12 @@ pub fn isValidPrivateKey(text: []const u8) bool {
 }
 
 // `line` must not contain CR or LF characters.
-pub fn isKeySectionBarrier(line: []const u8) bool {
-    return line.len >= 6 and mem.startsWith(u8, line, "---") and mem.endsWith(u8, line, "---");
+pub fn isKeySectionBarrier(line: []const u8, opening: bool) bool {
+    if (line.len < 6) return false;
+    const start = mem.indexOf(u8, line, "---") orelse return false;
+    if (!opening and start != 0) return false;
+    if (line.len - start < 6) return false;
+    return mem.endsWith(u8, line, "---");
 }
 
 const allowed_creds_section_chars_table: [256]bool = allowed: {
@@ -401,21 +405,15 @@ pub fn areKeySectionContentsValid(contents: []const u8) bool {
 }
 
 pub fn findKeySection(text: []const u8, line_it: *std.mem.SplitIterator) ?[]const u8 {
-    // TODO(rutgerbrf): There is a weird edge case in the github.com/nats-io/nkeys library,
-    // see https://regex101.com/r/pEaqcJ/1. It allows the opening barrier to start at an
-    // arbitrary point on the line, meaning that `asdf-----BEGIN USER NKEY SEED-----`
-    // is regarded as a valid opening barrier by the library.
-    // Should we accept a creds file formatted in such a manner?
-
     while (true) {
         const opening_line = line_it.next() orelse return null;
-        if (!isKeySectionBarrier(opening_line)) continue;
+        if (!isKeySectionBarrier(opening_line, true)) continue;
 
         const contents_line = line_it.next() orelse return null;
         if (!areKeySectionContentsValid(contents_line)) continue;
 
         const closing_line = line_it.next() orelse return null;
-        if (!isKeySectionBarrier(closing_line)) continue;
+        if (!isKeySectionBarrier(closing_line, false)) continue;
 
         return contents_line;
     }

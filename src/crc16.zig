@@ -1,7 +1,7 @@
 pub const InvalidChecksumError = error{InvalidChecksum};
 
 const crc16tab: [256]u16 = tab: {
-    @setEvalBranchQuota(10000);
+    @setEvalBranchQuota(5000);
 
     // CRC-16-CCITT/XMODEM
     const poly: u32 = 0x1021;
