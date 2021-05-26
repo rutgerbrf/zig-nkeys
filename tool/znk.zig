@@ -90,17 +90,20 @@ const usage_gen =
     \\
     \\Generate Options:
     \\
+    \\  -e, --entropy  Path of file to get entropy from
     \\  -o, --pub-out  Print the public key to stdout
     \\  -p, --prefix   Vanity public key prefix, turns -o on
     \\
 ;
 
 pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
+    const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
     var role: ?nkeys.Role = null;
     var pub_out: bool = false;
     var prefix: ?[]const u8 = null;
+    var entropy: ?fs.File = null;
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -117,6 +120,17 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
                 if (args[i].len > nkeys.text_public_len - 1)
                     fatal("public key prefix '{s}' is too long", .{arg});
                 prefix = args[i];
+            } else if (mem.eql(u8, arg, "-e") or mem.eql(u8, arg, "--entropy")) {
+                if (i + 1 >= args.len) fatal("expected argument after '{s}'", .{arg});
+                i += 1;
+                if (entropy != null) fatal("parameter '{s}' provided more than once", .{arg});
+                if (std.mem.eql(u8, args[i], "-")) {
+                    entropy = stdin;
+                } else {
+                    entropy = fs.cwd().openFile(args[i], .{}) catch {
+                        fatal("could not open entropy file at {s}", .{args[i]});
+                    };
+                }
             } else {
                 fatal("unrecognized parameter: '{s}'", .{arg});
             }
@@ -145,9 +159,22 @@ pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !voi
     if (prefix != null) {
         const capitalized_prefix = try toUpper(arena, prefix.?);
 
-        try PrefixKeyGenerator.init(arena, role.?, capitalized_prefix).generate();
+        const entropy_reader = if (entropy) |e| e.reader() else null;
+        const Generator = PrefixKeyGenerator(@TypeOf(entropy_reader.?));
+        var generator = Generator.init(arena, role.?, capitalized_prefix, entropy_reader);
+        generator.generate() catch {
+            fatal("failed to generate key", .{});
+        };
     } else {
-        var kp = try nkeys.SeedKeyPair.generate(role.?);
+        var gen_result = res: {
+            if (entropy) |e| {
+                break :res nkeys.SeedKeyPair.generateWithCustomEntropy(role.?, e.reader());
+            } else {
+                break :res nkeys.SeedKeyPair.generate(role.?);
+            }
+        };
+        var kp = gen_result catch fatal("could not generate seed", .{});
+
         defer kp.wipe();
         try stdout.writeAll(&kp.seedText());
         try stdout.writeAll("\n");
@@ -174,7 +201,6 @@ const usage_sign =
 ;
 
 pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
-    // TODO(rutgerbrf): support setting a custom entropy file?
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -199,7 +225,9 @@ pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !vo
                     key = stdin;
                     key_stdin = true;
                 } else {
-                    key = try fs.cwd().openFile(args[i], .{});
+                    key = fs.cwd().openFile(args[i], .{}) catch {
+                        fatal("could not open key file at {s}", .{args[i]});
+                    };
                 }
             } else {
                 fatal("unrecognized parameter: '{s}'", .{arg});
@@ -210,7 +238,9 @@ pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !vo
             file = stdin;
             file_stdin = true;
         } else {
-            file = try fs.cwd().openFile(args[i], .{});
+            file = fs.cwd().openFile(args[i], .{}) catch {
+                fatal("could not open file to generate signature for (at {s})", .{args[i]});
+            };
         }
     }
 
@@ -284,7 +314,9 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
                     key = stdin;
                     key_stdin = true;
                 } else {
-                    key = try fs.cwd().openFile(args[i], .{});
+                    key = fs.cwd().openFile(args[i], .{}) catch {
+                        fatal("could not open file of key to verify with (at {s})", .{args[i]});
+                    };
                 }
             } else if (mem.eql(u8, arg, "-s") or mem.eql(u8, arg, "--sig")) {
                 if (i + 1 >= args.len) fatal("expected argument after '{s}'", .{arg});
@@ -294,7 +326,9 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
                     sig = stdin;
                     sig_stdin = true;
                 } else {
-                    sig = try fs.cwd().openFile(args[i], .{});
+                    sig = fs.cwd().openFile(args[i], .{}) catch {
+                        fatal("could not open signature file at {s}", .{args[i]});
+                    };
                 }
             } else {
                 fatal("unrecognized parameter: '{s}'", .{arg});
@@ -305,7 +339,9 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
             file = stdin;
             file_stdin = true;
         } else {
-            file = try fs.cwd().openFile(args[i], .{});
+            file = fs.cwd().openFile(args[i], .{}) catch {
+                fatal("could not open file to verify signature of (at {s})", .{args[i]});
+            };
         }
     }
 
@@ -324,7 +360,7 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
         fatal("no file to generate a signature for provided", .{});
     }
 
-    if (two(&.{ file_stdin, key_stdin, sig_stdin })) {
+    if ((file_stdin and key_stdin) or (file_stdin and sig_stdin) or (key_stdin and sig_stdin)) {
         fatal("can't use stdin for reading multiple files", .{});
     }
 
@@ -355,64 +391,66 @@ pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !
     try stdout.writeAll("good signature\n");
 }
 
-const PrefixKeyGenerator = struct {
-    role: nkeys.Role,
-    prefix: []const u8,
-    allocator: *Allocator,
-    done: std.atomic.Bool,
+fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
+    return struct {
+        role: nkeys.Role,
+        prefix: []const u8,
+        allocator: *Allocator,
+        done: std.atomic.Bool,
+        entropy: ?EntropyReaderType,
 
-    const Self = @This();
+        const Self = @This();
 
-    pub fn init(allocator: *Allocator, role: nkeys.Role, prefix: []const u8) Self {
-        return .{
-            .role = role,
-            .prefix = prefix,
-            .allocator = allocator,
-            .done = std.atomic.Bool.init(false),
+        pub fn init(allocator: *Allocator, role: nkeys.Role, prefix: []const u8, entropy: ?EntropyReaderType) Self {
+            return .{
+                .role = role,
+                .prefix = prefix,
+                .allocator = allocator,
+                .done = std.atomic.Bool.init(false),
+                .entropy = entropy,
+            };
+        }
+
+        fn generatePrivate(self: *Self) !void {
+            while (true) {
+                if (self.done.load(.SeqCst)) return;
+
+                var gen_result = res: {
+                    if (self.entropy) |entropy| {
+                        break :res nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, entropy);
+                    } else {
+                        break :res nkeys.SeedKeyPair.generate(self.role);
+                    }
+                };
+                var kp = gen_result catch fatal("could not generate seed", .{});
+
+                defer kp.wipe();
+                var public_key = kp.publicKeyText();
+                if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
+
+                if (self.done.xchg(true, .SeqCst)) return; // another thread is already done
+
+                info("{s}", .{kp.seedText()});
+                info("{s}", .{public_key});
+
+                return;
+            }
+        }
+
+        pub usingnamespace if (builtin.single_threaded) struct {
+            pub fn generate(self: *Self) !void {
+                return self.generatePrivate();
+            }
+        } else struct {
+            pub fn generate(self: *Self) !void {
+                var cpu_count = try std.Thread.cpuCount();
+                var threads = try self.allocator.alloc(*std.Thread, cpu_count);
+                defer self.allocator.free(threads);
+                for (threads) |*thread| thread.* = try std.Thread.spawn(Self.generatePrivate, self);
+                for (threads) |thread| thread.wait();
+            }
         };
-    }
-
-    fn generatePrivate(self: *Self) !void {
-        while (true) {
-            if (self.done.load(.SeqCst)) return;
-
-            var kp = try nkeys.SeedKeyPair.generate(self.role);
-            defer kp.wipe();
-            var public_key = kp.publicKeyText();
-            if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
-
-            if (self.done.xchg(true, .SeqCst)) return; // another thread is already done
-
-            info("{s}", .{kp.seedText()});
-            info("{s}", .{public_key});
-
-            return;
-        }
-    }
-
-    pub usingnamespace if (builtin.single_threaded) struct {
-        pub fn generate(self: *Self) !void {
-            return self.generatePrivate();
-        }
-    } else struct {
-        pub fn generate(self: *Self) !void {
-            var cpu_count = try std.Thread.cpuCount();
-            var threads = try self.allocator.alloc(*std.Thread, cpu_count);
-            defer self.allocator.free(threads);
-            for (threads) |*thread| thread.* = try std.Thread.spawn(Self.generatePrivate, self);
-            for (threads) |thread| thread.wait();
-        }
     };
-};
-
-fn two(slice: []const bool) bool {
-    var one = false;
-    for (slice) |x| if (x and one) {
-        return true;
-    } else {
-        one = true;
-    };
-    return false;
 }
 
 fn toUpper(allocator: *Allocator, slice: []const u8) ![]u8 {
@@ -503,5 +541,5 @@ pub fn readKeyFile(allocator: *Allocator, file: fs.File) ?Nkey {
 test "reference all declarations" {
     testing.refAllDecls(@This());
     testing.refAllDecls(Nkey);
-    testing.refAllDecls(PrefixKeyGenerator);
+    testing.refAllDecls(PrefixKeyGenerator(std.fs.File.Reader));
 }

@@ -116,6 +116,13 @@ pub const SeedKeyPair = struct {
         return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed) };
     }
 
+    pub fn generateWithCustomEntropy(role: Role, reader: anytype) !Self {
+        var raw_seed: [Ed25519.seed_length]u8 = undefined;
+        try reader.readNoEof(&raw_seed);
+        defer wipeBytes(&raw_seed);
+        return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed) };
+    }
+
     pub fn fromTextSeed(text: *const text_seed) SeedDecodeError!Self {
         var decoded = try decode(2, Ed25519.seed_length, text);
         defer decoded.wipe(); // gets copied
@@ -455,7 +462,7 @@ fn wipeBytes(bs: []u8) void {
     for (bs) |*b| b.* = 0;
 }
 
-test "reference all delcarations" {
+test "reference all declarations" {
     testing.refAllDecls(@This());
     testing.refAllDecls(Role);
     testing.refAllDecls(SeedKeyPair);
