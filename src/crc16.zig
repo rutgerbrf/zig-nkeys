@@ -30,12 +30,12 @@ pub fn update(crc: u16, with_data: []const u8) u16 {
     return new_crc;
 }
 
-// make returns the CRC16 checksum for the data provided.
+// make returns the CRC-16 checksum for the data provided.
 pub fn make(data: []const u8) u16 {
     return update(0, data);
 }
 
-// validate will check the calculated CRC16 checksum for data against the expected.
+// validate will check the calculated CRC-16 checksum for data against the expected.
 pub fn validate(data: []const u8, expected: u16) InvalidChecksumError!void {
     if (make(data) != expected) return error.InvalidChecksum;
 }
