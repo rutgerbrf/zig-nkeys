@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&lib_tests.step);
 
-    const znk_version = "0.1.0";
+    const znk_version = "0.2.1";
 
     var znk_tests = b.addTest("tool/znk.zig");
     znk_tests.setBuildMode(mode);
