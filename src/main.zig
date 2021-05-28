@@ -173,14 +173,14 @@ pub const SeedKeyPair = struct {
     }
 
     pub fn intoPublicKey(self: *const Self) PublicKey {
-        return PublicKey{
+        return .{
             .role = self.role,
             .key = self.kp.public_key,
         };
     }
 
     pub fn intoPrivateKey(self: *const Self) PrivateKey {
-        return PrivateKey{ .kp = self.kp };
+        return .{ .kp = self.kp };
     }
 
     pub fn wipe(self: *Self) void {
@@ -205,7 +205,7 @@ pub const PublicKey = struct {
     }
 
     pub fn fromRawPublicKey(role: Role, raw_key: *const [Ed25519.public_length]u8) Self {
-        return Self{ .role = role, .key = raw_key.* };
+        return .{ .role = role, .key = raw_key.* };
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
@@ -232,22 +232,22 @@ pub const PrivateKey = struct {
         defer decoded.wipe(); // gets copied
         if (decoded.prefix[0] != prefix_byte_private)
             return error.InvalidPrivateKey;
-        return PrivateKey{ .kp = Ed25519.KeyPair.fromSecretKey(decoded.data) };
+        return Self{ .kp = Ed25519.KeyPair.fromSecretKey(decoded.data) };
     }
 
     pub fn fromRawPrivateKey(raw_key: *const [Ed25519.secret_length]u8) Self {
-        return Self{ .kp = Ed25519.KeyPair.fromSecretKey(raw_key.*) };
+        return .{ .kp = Ed25519.KeyPair.fromSecretKey(raw_key.*) };
     }
 
     pub fn intoSeedKeyPair(self: *const Self, role: Role) SeedKeyPair {
-        return SeedKeyPair{
+        return .{
             .role = role,
             .kp = self.kp,
         };
     }
 
     pub fn intoPublicKey(self: *const Self, role: Role) PublicKey {
-        return PublicKey{
+        return .{
             .role = role,
             .key = self.kp.public_key,
         };
