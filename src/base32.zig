@@ -236,7 +236,7 @@ pub const Decoder = struct {
 fn safeMulDiv(a: u64, b: u64, c: u64) u64 {
     const q = a / c;
     const r = a % c;
-    // (a * b) + (r * b) / c;
+    // (a * b) / c == (a / c) * b + ((a % c) * b) / c
     return (q * b) + (r * b) / c;
 }
 
