@@ -155,8 +155,7 @@ pub const Decoder = struct {
 
     /// Calculate the size of a Base32-encoded array of bytes.
     pub fn calcSize(source_len: usize) usize {
-        const source_len_bits = source_len * 5;
-        return source_len_bits / 8;
+        return safeMulDiv(source_len, 5, 8);
     }
 
     /// Decode a slice of Base32-encoded data.
@@ -230,6 +229,16 @@ pub const Decoder = struct {
         return ret;
     }
 };
+
+// Taken from std.time.
+// Calculate (a * b) / c without risk of overflowing too early because of the
+// multiplication.
+fn safeMulDiv(a: u64, b: u64, c: u64) u64 {
+    const q = a / c;
+    const r = a % c;
+    // (a * b) + (r * b) / c;
+    return (q * b) + (r * b) / c;
+}
 
 test {
     const encoded = "ORUGS4ZANFZSAYJAORSXG5A";
