@@ -390,7 +390,7 @@ pub fn areKeySectionContentsValid(contents: []const u8) bool {
     return true;
 }
 
-pub fn findKeySection(text: []const u8, line_it: *std.mem.SplitIterator) ?[]const u8 {
+pub fn findKeySection(line_it: *std.mem.SplitIterator) ?[]const u8 {
     while (true) {
         const opening_line = line_it.next() orelse return null;
         if (!isKeySectionBarrier(opening_line, true)) continue;
@@ -407,15 +407,14 @@ pub fn findKeySection(text: []const u8, line_it: *std.mem.SplitIterator) ?[]cons
 
 pub fn parseDecoratedJwt(contents: []const u8) []const u8 {
     var line_it = mem.split(contents, "\n");
-    return findKeySection(contents, &line_it) orelse return contents;
+    return findKeySection(&line_it) orelse return contents;
 }
 
 pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair {
     var line_it = mem.split(contents, "\n");
-    var current_off: usize = 0;
     var seed: ?[]const u8 = null;
-    if (findKeySection(contents, &line_it) != null)
-        seed = findKeySection(contents, &line_it);
+    if (findKeySection(&line_it) != null)
+        seed = findKeySection(&line_it);
     if (seed == null)
         seed = findNkey(contents) orelse return error.NoNkeySeedFound;
     if (!isValidCredsNkey(seed.?))
@@ -441,7 +440,6 @@ fn isValidCredsNkey(text: []const u8) bool {
 
 fn findNkey(text: []const u8) ?[]const u8 {
     var line_it = std.mem.split(text, "\n");
-    var current_off: usize = 0;
     while (line_it.next()) |line| {
         for (line) |c, i| {
             if (!ascii.isSpace(c)) {
