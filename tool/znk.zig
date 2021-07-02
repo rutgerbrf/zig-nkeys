@@ -46,10 +46,10 @@ pub fn main() anyerror!void {
     const arena = &arena_instance.allocator;
 
     const args = try process.argsAlloc(arena);
-    return mainArgs(gpa, arena, args);
+    return mainArgs(arena, args);
 }
 
-pub fn mainArgs(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
+pub fn mainArgs(arena: *Allocator, args: []const []const u8) !void {
     if (args.len <= 1) {
         info("{s}", .{usage});
         fatal("expected command argument", .{});
@@ -58,11 +58,11 @@ pub fn mainArgs(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !v
     const cmd = args[1];
     const cmd_args = args[2..];
     if (mem.eql(u8, cmd, "gen")) {
-        return cmdGen(gpa, arena, cmd_args);
+        return cmdGen(arena, cmd_args);
     } else if (mem.eql(u8, cmd, "sign")) {
-        return cmdSign(gpa, arena, cmd_args);
+        return cmdSign(arena, cmd_args);
     } else if (mem.eql(u8, cmd, "verify")) {
-        return cmdVerify(gpa, arena, cmd_args);
+        return cmdVerify(arena, cmd_args);
     } else if (mem.eql(u8, cmd, "version")) {
         return io.getStdOut().writeAll(build_options.version ++ "\n");
     } else if (mem.eql(u8, cmd, "help") or mem.eql(u8, cmd, "-h") or mem.eql(u8, cmd, "--help")) {
@@ -96,7 +96,7 @@ const usage_gen =
     \\
 ;
 
-pub fn cmdGen(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdGen(arena: *Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -200,7 +200,7 @@ const usage_sign =
     \\
 ;
 
-pub fn cmdSign(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdSign(arena: *Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -286,7 +286,7 @@ const usage_verify =
     \\
 ;
 
-pub fn cmdVerify(gpa: *Allocator, arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdVerify(arena: *Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -396,7 +396,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         role: nkeys.Role,
         prefix: []const u8,
         allocator: *Allocator,
-        done: std.atomic.Bool,
+        done: std.atomic.Atomic(bool),
         entropy: ?EntropyReaderType,
 
         const Self = @This();
@@ -406,7 +406,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
                 .role = role,
                 .prefix = prefix,
                 .allocator = allocator,
-                .done = std.atomic.Bool.init(false),
+                .done = std.atomic.Atomic(bool).init(false),
                 .entropy = entropy,
             };
         }
@@ -428,7 +428,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
                 var public_key = kp.publicKeyText();
                 if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
 
-                if (self.done.xchg(true, .SeqCst)) return; // another thread is already done
+                if (self.done.swap(true, .SeqCst)) return; // another thread is already done
 
                 info("{s}", .{kp.seedText()});
                 info("{s}", .{public_key});
