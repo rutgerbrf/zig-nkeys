@@ -446,7 +446,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
                 var cpu_count = try std.Thread.getCpuCount();
                 var threads = try self.allocator.alloc(std.Thread, cpu_count);
                 defer self.allocator.free(threads);
-                for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{ self });
+                for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{self});
                 for (threads) |thread| thread.join();
             }
         };
