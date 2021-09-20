@@ -4,7 +4,7 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
-    var lib_tests = b.addTest("src/main.zig");
+    const lib_tests = b.addTest("src/main.zig");
     lib_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run library tests");
@@ -12,10 +12,13 @@ pub fn build(b: *std.build.Builder) !void {
 
     const znk_version = "0.2.1";
 
-    var znk_tests = b.addTest("tool/znk.zig");
+    const znk_options = b.addOptions();
+    znk_options.addOption([]const u8, "version", znk_version);
+
+    const znk_tests = b.addTest("tool/znk.zig");
     znk_tests.setBuildMode(mode);
     znk_tests.addPackagePath("nkeys", "src/main.zig");
-    znk_tests.addBuildOption([]const u8, "version", znk_version);
+    znk_tests.addOptions("build_options", znk_options);
 
     const znk_test_step = b.step("test-znk", "Run znk tests");
     znk_test_step.dependOn(&znk_tests.step);
@@ -24,7 +27,7 @@ pub fn build(b: *std.build.Builder) !void {
     znk.setBuildMode(mode);
     znk.setTarget(target);
     znk.addPackagePath("nkeys", "src/main.zig");
-    znk.addBuildOption([]const u8, "version", znk_version);
+    znk.addOptions("build_options", znk_options);
 
     const znk_install = b.addInstallArtifact(znk);
 

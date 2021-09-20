@@ -1,6 +1,6 @@
 pkgs:
   nkeys:
-    version: 0.3.0
+    version: 0.3.1
     description: "NKeys support for Zig"
     license: Apache-2.0
     source_url: "https://github.com/rutgerbrf/zig-nkeys"

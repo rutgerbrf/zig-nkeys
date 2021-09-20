@@ -443,11 +443,11 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
             }
         } else struct {
             pub fn generate(self: *Self) !void {
-                var cpu_count = try std.Thread.cpuCount();
-                var threads = try self.allocator.alloc(*std.Thread, cpu_count);
+                var cpu_count = try std.Thread.getCpuCount();
+                var threads = try self.allocator.alloc(std.Thread, cpu_count);
                 defer self.allocator.free(threads);
-                for (threads) |*thread| thread.* = try std.Thread.spawn(Self.generatePrivate, self);
-                for (threads) |thread| thread.wait();
+                for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{ self });
+                for (threads) |thread| thread.join();
             }
         };
     };
@@ -526,7 +526,7 @@ pub fn readKeyFile(allocator: *Allocator, file: fs.File) ?Nkey {
         allocator.free(bytes);
     }
 
-    var iterator = mem.split(bytes, "\n");
+    var iterator = mem.split(u8, bytes, "\n");
     while (iterator.next()) |line| {
         if (nkeys.isValidEncoding(line) and line.len == nkeys.text_seed_len) {
             var k = Nkey.fromText(line) catch continue;
