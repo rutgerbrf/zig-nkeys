@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = mem.Allocator;
 const ascii = std.ascii;
 const build_options = @import("build_options");
-const builtin = std.builtin;
+const builtin = @import("builtin");
 const fs = std.fs;
 const io = std.io;
 const mem = std.mem;
@@ -39,17 +39,17 @@ const usage =
 pub fn main() anyerror!void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!general_purpose_allocator.deinit());
-    const gpa = &general_purpose_allocator.allocator;
+    const gpa = general_purpose_allocator.allocator();
 
     var arena_instance = std.heap.ArenaAllocator.init(gpa);
     defer arena_instance.deinit();
-    const arena = &arena_instance.allocator;
+    const arena = arena_instance.allocator();
 
     const args = try process.argsAlloc(arena);
     return mainArgs(arena, args);
 }
 
-pub fn mainArgs(arena: *Allocator, args: []const []const u8) !void {
+pub fn mainArgs(arena: Allocator, args: []const []const u8) !void {
     if (args.len <= 1) {
         info("{s}", .{usage});
         fatal("expected command argument", .{});
@@ -96,7 +96,7 @@ const usage_gen =
     \\
 ;
 
-pub fn cmdGen(arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdGen(arena: Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -200,7 +200,7 @@ const usage_sign =
     \\
 ;
 
-pub fn cmdSign(arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdSign(arena: Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -286,7 +286,7 @@ const usage_verify =
     \\
 ;
 
-pub fn cmdVerify(arena: *Allocator, args: []const []const u8) !void {
+pub fn cmdVerify(arena: Allocator, args: []const []const u8) !void {
     const stdin = io.getStdIn();
     const stdout = io.getStdOut();
 
@@ -391,17 +391,39 @@ pub fn cmdVerify(arena: *Allocator, args: []const []const u8) !void {
     try stdout.writeAll("good signature\n");
 }
 
+const RandomReader = struct {
+    rand: *const std.rand.Random,
+
+    pub const Error = error{};
+    pub const Reader = io.Reader(*Self, Error, read);
+
+    const Self = @This();
+
+    pub fn init(rand: *const std.rand.Random) Self {
+        return .{ .rand = rand };
+    }
+
+    pub fn read(self: *Self, dest: []u8) Error!usize {
+        self.rand.bytes(dest);
+        return dest.len;
+    }
+
+    pub fn reader(self: *Self) Reader {
+        return .{ .context = self };
+    }
+};
+
 fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
     return struct {
         role: nkeys.Role,
         prefix: []const u8,
-        allocator: *Allocator,
+        allocator: Allocator,
         done: std.atomic.Atomic(bool),
         entropy: ?EntropyReaderType,
 
         const Self = @This();
 
-        pub fn init(allocator: *Allocator, role: nkeys.Role, prefix: []const u8, entropy: ?EntropyReaderType) Self {
+        pub fn init(allocator: Allocator, role: nkeys.Role, prefix: []const u8, entropy: ?EntropyReaderType) Self {
             return .{
                 .role = role,
                 .prefix = prefix,
@@ -412,28 +434,24 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         }
 
         fn generatePrivate(self: *Self) !void {
-            while (true) {
-                if (self.done.load(.SeqCst)) return;
-
-                var gen_result = res: {
-                    if (self.entropy) |entropy| {
-                        break :res nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, entropy);
-                    } else {
-                        break :res nkeys.SeedKeyPair.generate(self.role);
-                    }
-                };
+            var rr = RandomReader.init(&std.crypto.random);
+            var brr = io.BufferedReader(1024 * 4096, @TypeOf(rr.reader())){ .unbuffered_reader = rr.reader() };
+            while (!self.done.load(.SeqCst)) {
+                var gen_result = if (self.entropy) |entropy|
+                    nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, entropy)
+                else
+                    nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, brr.reader());
                 var kp = gen_result catch fatal("could not generate seed", .{});
 
-                defer kp.wipe();
                 var public_key = kp.publicKeyText();
-                if (!mem.startsWith(u8, public_key[1..], self.prefix)) continue;
+                if (mem.startsWith(u8, public_key[1..], self.prefix)) {
+                    if (self.done.swap(true, .SeqCst)) return; // another thread is already done
 
-                if (self.done.swap(true, .SeqCst)) return; // another thread is already done
+                    info("{s}", .{kp.seedText()});
+                    info("{s}", .{public_key});
 
-                info("{s}", .{kp.seedText()});
-                info("{s}", .{public_key});
-
-                return;
+                    return;
+                }
             }
         }
 
@@ -444,7 +462,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         } else struct {
             pub fn generate(self: *Self) !void {
                 var cpu_count = try std.Thread.getCpuCount();
-                var threads = try self.allocator.alloc(std.Thread, cpu_count);
+                var threads = try self.allocator.alloc(std.Thread, cpu_count*4);
                 defer self.allocator.free(threads);
                 for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{self});
                 for (threads) |thread| thread.join();
@@ -453,7 +471,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
     };
 }
 
-fn toUpper(allocator: *Allocator, slice: []const u8) ![]u8 {
+fn toUpper(allocator: Allocator, slice: []const u8) ![]u8 {
     const result = try allocator.alloc(u8, slice.len);
     for (slice) |c, i| result[i] = ascii.toUpper(c);
     return result;
@@ -519,7 +537,7 @@ pub const Nkey = union(enum) {
     }
 };
 
-pub fn readKeyFile(allocator: *Allocator, file: fs.File) ?Nkey {
+pub fn readKeyFile(allocator: Allocator, file: fs.File) ?Nkey {
     var bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
     defer {
         for (bytes) |*b| b.* = 0;
