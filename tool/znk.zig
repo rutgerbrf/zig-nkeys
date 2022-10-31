@@ -266,8 +266,8 @@ pub fn cmdSign(arena: Allocator, args: []const []const u8) !void {
     defer nkey.wipe();
 
     const sig = nkey.sign(content) catch fatal("could not generate signature", .{});
-    var encoded_sig = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(sig.len));
-    _ = std.base64.standard.Encoder.encode(encoded_sig, &sig);
+    var encoded_sig = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(std.crypto.sign.Ed25519.Signature.encoded_length));
+    _ = std.base64.standard.Encoder.encode(encoded_sig, &sig.toBytes());
     try stdout.writeAll(encoded_sig);
     try stdout.writeAll("\n");
 }
@@ -377,14 +377,16 @@ pub fn cmdVerify(arena: Allocator, args: []const []const u8) !void {
     const decoded_len = std.base64.standard.Decoder.calcSizeForSlice(trimmed_signature_b64) catch {
         fatal("invalid signature encoding", .{});
     };
-    if (decoded_len != std.crypto.sign.Ed25519.signature_length)
+    if (decoded_len != std.crypto.sign.Ed25519.Signature.encoded_length)
         fatal("invalid signature length", .{});
-    const signature = try arena.alloc(u8, decoded_len);
 
-    _ = std.base64.standard.Decoder.decode(signature, trimmed_signature_b64) catch {
+    var signature_bytes: [std.crypto.sign.Ed25519.Signature.encoded_length]u8 = undefined;
+    _ = std.base64.standard.Decoder.decode(&signature_bytes, trimmed_signature_b64) catch {
         fatal("invalid signature encoding", .{});
     };
-    k.verify(content, signature[0..std.crypto.sign.Ed25519.signature_length].*) catch {
+
+    const signature = std.crypto.sign.Ed25519.Signature.fromBytes(signature_bytes);
+    k.verify(content, signature) catch {
         fatal("bad signature", .{});
     };
 
@@ -462,7 +464,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         } else struct {
             pub fn generate(self: *Self) !void {
                 var cpu_count = try std.Thread.getCpuCount();
-                var threads = try self.allocator.alloc(std.Thread, cpu_count*4);
+                var threads = try self.allocator.alloc(std.Thread, cpu_count * 4);
                 defer self.allocator.free(threads);
                 for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{self});
                 for (threads) |thread| thread.join();
@@ -495,7 +497,7 @@ pub const Nkey = union(enum) {
     pub fn verify(
         self: *const Self,
         msg: []const u8,
-        sig: [std.crypto.sign.Ed25519.signature_length]u8,
+        sig: std.crypto.sign.Ed25519.Signature,
     ) !void {
         return switch (self.*) {
             .seed_key_pair => |*kp| try kp.verify(msg, sig),
@@ -507,7 +509,7 @@ pub const Nkey = union(enum) {
     pub fn sign(
         self: *const Self,
         msg: []const u8,
-    ) ![std.crypto.sign.Ed25519.signature_length]u8 {
+    ) !std.crypto.sign.Ed25519.Signature {
         return switch (self.*) {
             .seed_key_pair => |*kp| try kp.sign(msg),
             .private_key => |*pk| try pk.sign(msg),

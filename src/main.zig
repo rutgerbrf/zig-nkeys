@@ -14,10 +14,10 @@ pub const InvalidSeedError = error{InvalidSeed};
 pub const InvalidSignatureError = error{InvalidSignature};
 pub const NoNkeySeedFoundError = error{NoNkeySeedFound};
 pub const NoNkeyUserSeedFoundError = error{NoNkeyUserSeedFound};
-pub const DecodeError = InvalidPrefixByteError || base32.DecodeError || crc16.InvalidChecksumError;
+pub const DecodeError = InvalidPrefixByteError || base32.DecodeError || crc16.InvalidChecksumError || crypto.errors.NonCanonicalError;
 pub const SeedDecodeError = DecodeError || InvalidSeedError || crypto.errors.IdentityElementError;
-pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypto.errors.IdentityElementError;
-pub const SignError = crypto.errors.IdentityElementError || crypto.errors.WeakPublicKeyError || crypto.errors.KeyMismatchError;
+pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypto.errors.EncodingError;
+pub const SignError = crypto.errors.IdentityElementError || crypto.errors.NonCanonicalError || crypto.errors.KeyMismatchError || crypto.errors.WeakPublicKeyError;
 
 pub const prefix_byte_account = 0; // A
 pub const prefix_byte_cluster = 2 << 3; // C
@@ -89,11 +89,11 @@ pub const Role = enum(u8) {
 };
 
 // One prefix byte, two CRC bytes
-const binary_private_size = 1 + Ed25519.secret_length + 2;
+const binary_private_size = 1 + Ed25519.SecretKey.encoded_length + 2;
 // One prefix byte, two CRC bytes
-const binary_public_size = 1 + Ed25519.public_length + 2;
+const binary_public_size = 1 + Ed25519.PublicKey.encoded_length + 2;
 // Two prefix bytes, two CRC bytes
-const binary_seed_size = 2 + Ed25519.seed_length + 2;
+const binary_seed_size = 2 + Ed25519.KeyPair.seed_length + 2;
 
 pub const text_private_len = base32.Encoder.calcSize(binary_private_size);
 pub const text_public_len = base32.Encoder.calcSize(binary_public_size);
@@ -110,21 +110,21 @@ pub const SeedKeyPair = struct {
     kp: Ed25519.KeyPair,
 
     pub fn generate(role: Role) crypto.errors.IdentityElementError!Self {
-        var raw_seed: [Ed25519.seed_length]u8 = undefined;
+        var raw_seed: [Ed25519.KeyPair.seed_length]u8 = undefined;
         crypto.random.bytes(&raw_seed);
         defer wipeBytes(&raw_seed);
         return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed) };
     }
 
     pub fn generateWithCustomEntropy(role: Role, reader: anytype) !Self {
-        var raw_seed: [Ed25519.seed_length]u8 = undefined;
+        var raw_seed: [Ed25519.KeyPair.seed_length]u8 = undefined;
         try reader.readNoEof(&raw_seed);
         defer wipeBytes(&raw_seed);
         return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed) };
     }
 
     pub fn fromTextSeed(text: *const text_seed) SeedDecodeError!Self {
-        var decoded = try decode(2, Ed25519.seed_length, text);
+        var decoded = try decode(2, Ed25519.KeyPair.seed_length, text);
         defer decoded.wipe(); // gets copied
 
         var key_ty_prefix = decoded.prefix[0] & 0b11111000;
@@ -141,17 +141,17 @@ pub const SeedKeyPair = struct {
 
     pub fn fromRawSeed(
         role: Role,
-        raw_seed: *const [Ed25519.seed_length]u8,
+        raw_seed: *const [Ed25519.KeyPair.seed_length]u8,
     ) crypto.errors.IdentityElementError!Self {
         return Self{ .role = role, .kp = try Ed25519.KeyPair.create(raw_seed.*) };
     }
 
-    pub fn sign(self: *const Self, msg: []const u8) SignError![Ed25519.signature_length]u8 {
-        return Ed25519.sign(msg, self.kp, null);
+    pub fn sign(self: *const Self, msg: []const u8) SignError!Ed25519.Signature {
+        return self.kp.sign(msg, null);
     }
 
-    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
-        Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
+    pub fn verify(self: *const Self, msg: []const u8, sig: Ed25519.Signature) InvalidSignatureError!void {
+        sig.verify(msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
     pub fn seedText(self: *const Self) text_seed {
@@ -160,16 +160,16 @@ pub const SeedKeyPair = struct {
             prefix_byte_seed | (public_prefix >> 5),
             (public_prefix & 0b00011111) << 3,
         };
-        const seed = self.kp.secret_key[0..Ed25519.seed_length];
-        return encode(full_prefix.len, seed.len, full_prefix, seed);
+        const seed = self.kp.secret_key.seed();
+        return encode(full_prefix.len, seed.len, full_prefix, &seed);
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &.{prefix_byte_private}, &self.kp.secret_key);
+        return encode(1, Ed25519.SecretKey.encoded_length, &.{prefix_byte_private}, &self.kp.secret_key.toBytes());
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.kp.public_key.len, &.{self.role.publicPrefixByte()}, &self.kp.public_key);
+        return encode(1, Ed25519.PublicKey.encoded_length, &.{self.role.publicPrefixByte()}, &self.kp.public_key.toBytes());
     }
 
     pub fn intoPublicKey(self: *const Self) PublicKey {
@@ -193,32 +193,33 @@ pub const PublicKey = struct {
     const Self = @This();
 
     role: Role,
-    key: [Ed25519.public_length]u8,
+    key: Ed25519.PublicKey,
 
     pub fn fromTextPublicKey(text: *const text_public) DecodeError!Self {
-        var decoded = try decode(1, Ed25519.public_length, text);
+        var decoded = try decode(1, Ed25519.PublicKey.encoded_length, text);
         defer decoded.wipe(); // gets copied
         return PublicKey{
             .role = Role.fromPublicPrefixByte(decoded.prefix[0]) orelse return error.InvalidPrefixByte,
-            .key = decoded.data,
+            .key = try Ed25519.PublicKey.fromBytes(decoded.data),
         };
     }
 
-    pub fn fromRawPublicKey(role: Role, raw_key: *const [Ed25519.public_length]u8) Self {
+    pub fn fromRawPublicKey(role: Role, raw_key: *const Ed25519.PublicKey) Self {
         return .{ .role = role, .key = raw_key.* };
     }
 
     pub fn publicKeyText(self: *const Self) text_public {
-        return encode(1, self.key.len, &.{self.role.publicPrefixByte()}, &self.key);
+        return encode(1, Ed25519.PublicKey.encoded_length, &.{self.role.publicPrefixByte()}, &self.key.toBytes());
     }
 
-    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
-        Ed25519.verify(sig, msg, self.key) catch return error.InvalidSignature;
+    pub fn verify(self: *const Self, msg: []const u8, sig: Ed25519.Signature) InvalidSignatureError!void {
+        // TODO: maybe propagate errors better herer
+        sig.verify(msg, self.key) catch return error.InvalidSignature;
     }
 
     pub fn wipe(self: *Self) void {
         self.role = .account;
-        wipeBytes(&self.key);
+        wipeBytes(&self.key.bytes);
     }
 };
 
@@ -228,15 +229,17 @@ pub const PrivateKey = struct {
     kp: Ed25519.KeyPair,
 
     pub fn fromTextPrivateKey(text: *const text_private) PrivateKeyDecodeError!Self {
-        var decoded = try decode(1, Ed25519.secret_length, text);
+        var decoded = try decode(1, Ed25519.SecretKey.encoded_length, text);
         defer decoded.wipe(); // gets copied
         if (decoded.prefix[0] != prefix_byte_private)
             return error.InvalidPrivateKey;
-        return Self{ .kp = Ed25519.KeyPair.fromSecretKey(decoded.data) };
+
+        var secret_key = Ed25519.SecretKey.fromBytes(decoded.data) catch unreachable;
+        return Self{ .kp = try Ed25519.KeyPair.fromSecretKey(secret_key) };
     }
 
-    pub fn fromRawPrivateKey(raw_key: *const [Ed25519.secret_length]u8) Self {
-        return .{ .kp = Ed25519.KeyPair.fromSecretKey(raw_key.*) };
+    pub fn fromRawPrivateKey(raw_key: *const Ed25519.SecretKey) InvalidEncodingError!Self {
+        return .{ .kp = try Ed25519.KeyPair.fromSecretKey(raw_key.*) };
     }
 
     pub fn intoSeedKeyPair(self: *const Self, role: Role) SeedKeyPair {
@@ -254,15 +257,15 @@ pub const PrivateKey = struct {
     }
 
     pub fn privateKeyText(self: *const Self) text_private {
-        return encode(1, self.kp.secret_key.len, &.{prefix_byte_private}, &self.kp.secret_key);
+        return encode(1, Ed25519.SecretKey.encoded_length, &.{prefix_byte_private}, &self.kp.secret_key.toBytes());
     }
 
-    pub fn sign(self: *const Self, msg: []const u8) SignError![Ed25519.signature_length]u8 {
-        return Ed25519.sign(msg, self.kp, null);
+    pub fn sign(self: *const Self, msg: []const u8) SignError!Ed25519.Signature {
+        return self.kp.sign(msg, null);
     }
 
-    pub fn verify(self: *const Self, msg: []const u8, sig: [Ed25519.signature_length]u8) InvalidSignatureError!void {
-        Ed25519.verify(sig, msg, self.kp.public_key) catch return error.InvalidSignature;
+    pub fn verify(self: *const Self, msg: []const u8, sig: Ed25519.Signature) InvalidSignatureError!void {
+        sig.verify(msg, self.kp.public_key) catch return error.InvalidSignature;
     }
 
     pub fn wipe(self: *Self) void {
@@ -452,8 +455,8 @@ fn findNkey(text: []const u8) ?[]const u8 {
 }
 
 fn wipeKeyPair(kp: *Ed25519.KeyPair) void {
-    wipeBytes(&kp.public_key);
-    wipeBytes(&kp.secret_key);
+    wipeBytes(&kp.public_key.bytes);
+    wipeBytes(&kp.secret_key.bytes);
 }
 
 fn wipeBytes(bs: []u8) void {
@@ -544,7 +547,7 @@ test "different key types" {
 
         const data = "Hello, world!";
         const sig = try kp.sign(data);
-        try testing.expect(sig.len == Ed25519.signature_length);
+        try testing.expect(sig.toBytes().len == Ed25519.Signature.encoded_length);
         try kp.verify(data, sig);
     }
 }
@@ -587,7 +590,7 @@ test "validation" {
 
 test "from seed" {
     const kp = try SeedKeyPair.generate(.account);
-    const kp_from_raw = try SeedKeyPair.fromRawSeed(kp.role, kp.kp.secret_key[0..Ed25519.seed_length]);
+    const kp_from_raw = try SeedKeyPair.fromRawSeed(kp.role, &kp.kp.secret_key.seed());
     try testing.expect(std.meta.eql(kp, kp_from_raw));
 
     const data = "Hello, World!";
@@ -636,14 +639,14 @@ test "from private key" {
     const pk_text_clone_2 = pk.privateKeyText();
     try testing.expect(std.meta.eql(pk, kp.intoPrivateKey()));
     try testing.expect(std.meta.eql(kp, pk.intoSeedKeyPair(.account)));
-    try testing.expect(std.meta.eql(pk, PrivateKey.fromRawPrivateKey(&kp.kp.secret_key)));
+    try testing.expect(std.meta.eql(pk, try PrivateKey.fromRawPrivateKey(&kp.kp.secret_key)));
     try testing.expectEqualStrings(&pk_text, &pk_text_clone_2);
 
     const data = "Hello, World!";
 
     const sig0 = try kp.sign(data);
     const sig1 = try pk.sign(data);
-    try testing.expectEqualSlices(u8, &sig0, &sig1);
+    try testing.expectEqualSlices(u8, &sig0.toBytes(), &sig1.toBytes());
     try pk.verify(data, sig0);
     try kp.verify(data, sig1);
 
