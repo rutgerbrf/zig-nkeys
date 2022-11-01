@@ -16,7 +16,7 @@ pub const NoNkeySeedFoundError = error{NoNkeySeedFound};
 pub const NoNkeyUserSeedFoundError = error{NoNkeyUserSeedFound};
 pub const DecodeError = InvalidPrefixByteError || base32.DecodeError || crc16.InvalidChecksumError || crypto.errors.NonCanonicalError;
 pub const SeedDecodeError = DecodeError || InvalidSeedError || crypto.errors.IdentityElementError;
-pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypto.errors.EncodingError;
+pub const PrivateKeyDecodeError = DecodeError || InvalidPrivateKeyError || crypto.errors.EncodingError || crypto.errors.NonCanonicalError || crypto.errors.IdentityElementError;
 pub const SignError = crypto.errors.IdentityElementError || crypto.errors.NonCanonicalError || crypto.errors.KeyMismatchError || crypto.errors.WeakPublicKeyError;
 
 pub const prefix_byte_account = 0; // A
@@ -133,10 +133,8 @@ pub const SeedKeyPair = struct {
         if (key_ty_prefix != prefix_byte_seed)
             return error.InvalidSeed;
 
-        return Self{
-            .role = Role.fromPublicPrefixByte(role_prefix) orelse return error.InvalidPrefixByte,
-            .kp = try Ed25519.KeyPair.create(decoded.data),
-        };
+        const role = Role.fromPublicPrefixByte(role_prefix) orelse return error.InvalidPrefixByte;
+        return fromRawSeed(role, &decoded.data);
     }
 
     pub fn fromRawSeed(
@@ -235,10 +233,12 @@ pub const PrivateKey = struct {
             return error.InvalidPrivateKey;
 
         var secret_key = Ed25519.SecretKey.fromBytes(decoded.data) catch unreachable;
-        return Self{ .kp = try Ed25519.KeyPair.fromSecretKey(secret_key) };
+        return fromRawPrivateKey(&secret_key);
     }
 
-    pub fn fromRawPrivateKey(raw_key: *const Ed25519.SecretKey) InvalidEncodingError!Self {
+    pub fn fromRawPrivateKey(
+        raw_key: *const Ed25519.SecretKey,
+    ) (crypto.errors.NonCanonicalError || crypto.errors.EncodingError || crypto.errors.IdentityElementError)!Self {
         return .{ .kp = try Ed25519.KeyPair.fromSecretKey(raw_key.*) };
     }
 
