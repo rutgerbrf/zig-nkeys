@@ -393,7 +393,7 @@ pub fn areKeySectionContentsValid(contents: []const u8) bool {
     return true;
 }
 
-pub fn findKeySection(line_it: *std.mem.SplitIterator(u8)) ?[]const u8 {
+pub fn findKeySection(line_it: *std.mem.SplitIterator(u8, .scalar)) ?[]const u8 {
     while (true) {
         const opening_line = line_it.next() orelse return null;
         if (!isKeySectionBarrier(opening_line, true)) continue;
@@ -409,12 +409,12 @@ pub fn findKeySection(line_it: *std.mem.SplitIterator(u8)) ?[]const u8 {
 }
 
 pub fn parseDecoratedJwt(contents: []const u8) []const u8 {
-    var line_it = mem.split(u8, contents, "\n");
+    var line_it = mem.splitScalar(u8, contents, '\n');
     return findKeySection(&line_it) orelse return contents;
 }
 
 pub fn parseDecoratedNkey(contents: []const u8) NoNkeySeedFoundError!SeedKeyPair {
-    var line_it = mem.split(u8, contents, "\n");
+    var line_it = mem.splitScalar(u8, contents, '\n');
     var seed: ?[]const u8 = null;
     if (findKeySection(&line_it) != null)
         seed = findKeySection(&line_it);
@@ -444,8 +444,8 @@ fn isValidCredsNkey(text: []const u8) bool {
 fn findNkey(text: []const u8) ?[]const u8 {
     var line_it = std.mem.split(u8, text, "\n");
     while (line_it.next()) |line| {
-        for (line) |c, i| {
-            if (!ascii.isSpace(c)) {
+        for (line, 0..) |c, i| {
+            if (!ascii.isWhitespace(c)) {
                 if (isValidCredsNkey(line[i..])) return line[i..];
                 break;
             }
@@ -554,7 +554,7 @@ test "different key types" {
 
 test "validation" {
     const roles = @typeInfo(Role).Enum.fields;
-    inline for (roles) |field, i| {
+    inline for (roles, 0..) |field, i| {
         const role = @field(Role, field.name);
         const next_role = next: {
             const next_field_i = if (i == roles.len - 1) 0 else i + 1;

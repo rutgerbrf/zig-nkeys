@@ -1,41 +1,56 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) !void {
-    const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    const lib_tests = b.addTest("src/main.zig");
-    lib_tests.setBuildMode(mode);
+    const lib_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    const run_lib_tests = b.addRunArtifact(lib_tests);
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&lib_tests.step);
+    test_step.dependOn(&run_lib_tests.step);
 
     const znk_version = "0.2.1";
 
     const znk_options = b.addOptions();
     znk_options.addOption([]const u8, "version", znk_version);
 
-    const znk_tests = b.addTest("tool/znk.zig");
-    znk_tests.setBuildMode(mode);
-    znk_tests.addPackagePath("nkeys", "src/main.zig");
+    const nkeys_module = b.addModule("nkeys", .{
+        .source_file = .{ .path = "src/main.zig" },
+    });
+
+    const znk_tests = b.addTest(.{
+        .root_source_file = .{ .path = "tool/znk.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    znk_tests.addModule("nkeys", nkeys_module);
     znk_tests.addOptions("build_options", znk_options);
+    const run_znk_tests = b.addRunArtifact(znk_tests);
 
     const znk_test_step = b.step("test-znk", "Run znk tests");
-    znk_test_step.dependOn(&znk_tests.step);
+    znk_test_step.dependOn(&run_znk_tests.step);
 
-    const znk = b.addExecutable("znk", "tool/znk.zig");
-    znk.setBuildMode(mode);
-    znk.setTarget(target);
-    znk.addPackagePath("nkeys", "src/main.zig");
+    const znk = b.addExecutable(.{
+        .name = "znk",
+        .root_source_file = .{ .path = "tool/znk.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    znk.addModule("nkeys", nkeys_module);
     znk.addOptions("build_options", znk_options);
 
-    const znk_install = b.addInstallArtifact(znk);
+    b.installArtifact(znk);
 
     const znk_step = b.step("znk", "Build znk");
-    znk_step.dependOn(&znk_install.step);
+    znk_step.dependOn(b.getInstallStep());
 
-    const znk_run_cmd = znk.run();
-    znk_run_cmd.step.dependOn(&znk_install.step);
+    const znk_run_cmd = b.addRunArtifact(znk);
+    znk_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         znk_run_cmd.addArgs(args);
     }

@@ -7,7 +7,7 @@ const crc16tab: [256]u16 = tab: {
     const poly: u32 = 0x1021;
     var table: [256]u16 = undefined;
 
-    for (table) |*crc, i| {
+    for (&table, 0..) |*crc, i| {
         crc.* = @as(u16, i) << 8;
         var j = 0;
         while (j < 8) : (j += 1) {
@@ -25,7 +25,7 @@ const crc16tab: [256]u16 = tab: {
 pub fn update(crc: u16, with_data: []const u8) u16 {
     var new_crc = crc;
     for (with_data) |b| {
-        new_crc = (new_crc << 8) ^ crc16tab[@truncate(u8, new_crc >> 8) ^ b];
+        new_crc = (new_crc << 8) ^ crc16tab[@as(u8, @truncate(new_crc >> 8)) ^ b];
     }
     return new_crc;
 }

@@ -66,8 +66,8 @@ pub const Encoder = struct {
     fn frontBits(self: *const Self) ?u5 {
         const index = self.index orelse return null;
         const bits = self.buffer[index];
-        if (self.bit_off >= 4) return @truncate(u5, bits << (self.bit_off - 3));
-        return @truncate(u5, bits >> (3 - self.bit_off));
+        if (self.bit_off >= 4) return @as(u5, @truncate(bits << (self.bit_off - 3)));
+        return @as(u5, @truncate(bits >> (3 - self.bit_off)));
     }
 
     /// Get the bits of `self.buffer[self.index]` with the maximum amount specified by the `bits` parameter,
@@ -85,7 +85,7 @@ pub const Encoder = struct {
     fn backBits(self: *const Self, bits: u3) u5 {
         std.debug.assert(bits <= 5);
         if (bits == 0 or self.index == null) return 0;
-        return @truncate(u5, self.buffer[self.index.?] >> (7 - bits + 1));
+        return @as(u5, @truncate(self.buffer[self.index.?] >> (7 - bits + 1)));
     }
 
     /// Get the next 5-bit integer, read from `self.buffer`.
@@ -172,10 +172,10 @@ pub const Decoder = struct {
     /// Get a character from the buffer.
     fn decodeChar(c: u8) DecodeError!u5 {
         if (c >= 'A' and c <= 'Z') {
-            return @truncate(u5, c - @as(u8, 'A'));
+            return @as(u5, @truncate(c - @as(u8, 'A')));
         } else if (c >= '2' and c <= '9') {
             // '2' -> 26
-            return @truncate(u5, c - @as(u8, '2') + 26);
+            return @as(u5, @truncate(c - @as(u8, '2') + 26));
         } else {
             return error.CorruptInput;
         }
@@ -200,7 +200,7 @@ pub const Decoder = struct {
             // Calculate how many bits of the decoded remain when we've written part of it to the buffer.
             const c_remaining_len = 5 - buf_write_len;
             // Write (the first) part of the decoded character to the buffer.
-            self.buf |= (@as(u8, c) << 3) >> @truncate(u3, self.buf_len);
+            self.buf |= (@as(u8, c) << 3) >> @as(u3, @truncate(self.buf_len));
             self.buf_len += buf_write_len;
             if (self.buf_len == 8) {
                 // The buffer is full, we can return a byte.
@@ -210,7 +210,7 @@ pub const Decoder = struct {
                 if (buf_write_len != 5) {
                     // We didn't write the entire decoded character to the buffer.
                     // Write the remaining part to the beginning of the buffer.
-                    self.buf = @as(u8, c) << @truncate(u3, buf_write_len + 3);
+                    self.buf = @as(u8, c) << @as(u3, @truncate(buf_write_len + 3));
                 }
                 return ret;
             }

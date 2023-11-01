@@ -38,7 +38,7 @@ const usage =
 
 pub fn main() anyerror!void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(!general_purpose_allocator.deinit());
+    defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
     const gpa = general_purpose_allocator.allocator();
 
     var arena_instance = std.heap.ArenaAllocator.init(gpa);
@@ -475,7 +475,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
 
 fn toUpper(allocator: Allocator, slice: []const u8) ![]u8 {
     const result = try allocator.alloc(u8, slice.len);
-    for (slice) |c, i| result[i] = ascii.toUpper(c);
+    for (slice, 0..) |c, i| result[i] = ascii.toUpper(c);
     return result;
 }
 
