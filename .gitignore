@@ -1,6 +1,2 @@
 zig-cache/
 zig-out/
-deps.zig
-.zigmod/
-.gyro/
-gyro.lock
