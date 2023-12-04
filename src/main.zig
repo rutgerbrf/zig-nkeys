@@ -127,8 +127,8 @@ pub const SeedKeyPair = struct {
         var decoded = try decode(2, Ed25519.KeyPair.seed_length, text);
         defer decoded.wipe(); // gets copied
 
-        var key_ty_prefix = decoded.prefix[0] & 0b11111000;
-        var role_prefix = (decoded.prefix[0] << 5) | (decoded.prefix[1] >> 3);
+        const key_ty_prefix = decoded.prefix[0] & 0b11111000;
+        const role_prefix = (decoded.prefix[0] << 5) | (decoded.prefix[1] >> 3);
 
         if (key_ty_prefix != prefix_byte_seed)
             return error.InvalidSeed;
@@ -288,8 +288,8 @@ fn encode(
 
     mem.copy(u8, &buf, prefix[0..]);
     mem.copy(u8, buf[prefix_len..], data[0..]);
-    var off = prefix_len + data_len;
-    var checksum = crc16.make(buf[0..off]);
+    const off = prefix_len + data_len;
+    const checksum = crc16.make(buf[0..off]);
     mem.writeIntLittle(u16, buf[buf.len - 2 .. buf.len], checksum);
 
     var text: encoded_key(prefix_len, data_len) = undefined;
@@ -321,7 +321,7 @@ fn decode(
     defer wipeBytes(&raw);
     std.debug.assert((try base32.Decoder.decode(&raw, text[0..])).len == raw.len);
 
-    var checksum = mem.readIntLittle(u16, raw[raw.len - 2 .. raw.len]);
+    const checksum = mem.readIntLittle(u16, raw[raw.len - 2 .. raw.len]);
     try crc16.validate(raw[0 .. raw.len - 2], checksum);
 
     return DecodedNkey(prefix_len, data_len){
@@ -336,7 +336,7 @@ pub fn isValidEncoding(text: []const u8) bool {
     var dec = base32.Decoder.init(text);
     var crc_buf: [2]u8 = undefined;
     var crc_buf_len: u8 = 0;
-    var expect_len: usize = base32.Decoder.calcSize(text.len);
+    const expect_len: usize = base32.Decoder.calcSize(text.len);
     var wrote_n_total: usize = 0;
     while (dec.next() catch return false) |b| {
         wrote_n_total += 1;
@@ -347,7 +347,7 @@ pub fn isValidEncoding(text: []const u8) bool {
     }
     std.debug.assert(wrote_n_total == expect_len);
     if (crc_buf_len != 2) unreachable;
-    var got_crc = mem.readIntLittle(u16, &crc_buf);
+    const got_crc = mem.readIntLittle(u16, &crc_buf);
     return made_crc == got_crc;
 }
 
@@ -725,6 +725,6 @@ test "parse decorated seed and JWT" {
     got_kp = try parseDecoratedNkey(creds);
     try testing.expectEqualStrings(seed, &got_kp.seedText());
 
-    var got_jwt = parseDecoratedJwt(creds);
+    const got_jwt = parseDecoratedJwt(creds);
     try testing.expectEqualStrings(jwt, got_jwt);
 }

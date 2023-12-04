@@ -166,7 +166,7 @@ pub fn cmdGen(arena: Allocator, args: []const []const u8) !void {
             fatal("failed to generate key", .{});
         };
     } else {
-        var gen_result = res: {
+        const gen_result = res: {
             if (entropy) |e| {
                 break :res nkeys.SeedKeyPair.generateWithCustomEntropy(role.?, e.reader());
             } else {
@@ -266,7 +266,7 @@ pub fn cmdSign(arena: Allocator, args: []const []const u8) !void {
     defer nkey.wipe();
 
     const sig = nkey.sign(content) catch fatal("could not generate signature", .{});
-    var encoded_sig = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(std.crypto.sign.Ed25519.Signature.encoded_length));
+    const encoded_sig = try arena.alloc(u8, std.base64.standard.Encoder.calcSize(std.crypto.sign.Ed25519.Signature.encoded_length));
     _ = std.base64.standard.Encoder.encode(encoded_sig, &sig.toBytes());
     try stdout.writeAll(encoded_sig);
     try stdout.writeAll("\n");
@@ -439,7 +439,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
             var rr = RandomReader.init(&std.crypto.random);
             var brr = io.BufferedReader(1024 * 4096, @TypeOf(rr.reader())){ .unbuffered_reader = rr.reader() };
             while (!self.done.load(.SeqCst)) {
-                var gen_result = if (self.entropy) |entropy|
+                const gen_result = if (self.entropy) |entropy|
                     nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, entropy)
                 else
                     nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, brr.reader());
@@ -463,8 +463,8 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
             }
         } else struct {
             pub fn generate(self: *Self) !void {
-                var cpu_count = try std.Thread.getCpuCount();
-                var threads = try self.allocator.alloc(std.Thread, cpu_count * 4);
+                const cpu_count = try std.Thread.getCpuCount();
+                const threads = try self.allocator.alloc(std.Thread, cpu_count * 4);
                 defer self.allocator.free(threads);
                 for (threads) |*thread| thread.* = try std.Thread.spawn(.{}, Self.generatePrivate, .{self});
                 for (threads) |thread| thread.join();
@@ -540,7 +540,7 @@ pub const Nkey = union(enum) {
 };
 
 pub fn readKeyFile(allocator: Allocator, file: fs.File) ?Nkey {
-    var bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
+    const bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch fatal("could not read key file", .{});
     defer {
         for (bytes) |*b| b.* = 0;
         allocator.free(bytes);
