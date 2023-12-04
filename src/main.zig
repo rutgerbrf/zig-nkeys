@@ -286,11 +286,11 @@ fn encode(
     var buf: [prefix_len + data_len + 2]u8 = undefined;
     defer wipeBytes(&buf);
 
-    mem.copy(u8, &buf, prefix[0..]);
-    mem.copy(u8, buf[prefix_len..], data[0..]);
+    mem.copyForwards(u8, &buf, prefix[0..]);
+    mem.copyForwards(u8, buf[prefix_len..], data[0..]);
     const off = prefix_len + data_len;
     const checksum = crc16.make(buf[0..off]);
-    mem.writeIntLittle(u16, buf[buf.len - 2 .. buf.len], checksum);
+    mem.writeInt(u16, buf[buf.len - 2 .. buf.len], checksum, .little);
 
     var text: encoded_key(prefix_len, data_len) = undefined;
     std.debug.assert(base32.Encoder.encode(&text, &buf).len == text.len);
@@ -321,7 +321,7 @@ fn decode(
     defer wipeBytes(&raw);
     std.debug.assert((try base32.Decoder.decode(&raw, text[0..])).len == raw.len);
 
-    const checksum = mem.readIntLittle(u16, raw[raw.len - 2 .. raw.len]);
+    const checksum = mem.readInt(u16, raw[raw.len - 2 .. raw.len], .little);
     try crc16.validate(raw[0 .. raw.len - 2], checksum);
 
     return DecodedNkey(prefix_len, data_len){
@@ -347,7 +347,7 @@ pub fn isValidEncoding(text: []const u8) bool {
     }
     std.debug.assert(wrote_n_total == expect_len);
     if (crc_buf_len != 2) unreachable;
-    const got_crc = mem.readIntLittle(u16, &crc_buf);
+    const got_crc = mem.readInt(u16, &crc_buf, .little);
     return made_crc == got_crc;
 }
 

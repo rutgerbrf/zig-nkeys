@@ -420,7 +420,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         role: nkeys.Role,
         prefix: []const u8,
         allocator: Allocator,
-        done: std.atomic.Atomic(bool),
+        done: std.atomic.Value(bool),
         entropy: ?EntropyReaderType,
 
         const Self = @This();
@@ -430,7 +430,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
                 .role = role,
                 .prefix = prefix,
                 .allocator = allocator,
-                .done = std.atomic.Atomic(bool).init(false),
+                .done = std.atomic.Value(bool).init(false),
                 .entropy = entropy,
             };
         }
