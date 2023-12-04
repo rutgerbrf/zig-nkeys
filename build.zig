@@ -23,6 +23,15 @@ pub fn build(b: *std.build.Builder) !void {
         .source_file = .{ .path = "src/main.zig" },
     });
 
+    const lib = b.addStaticLibrary(.{
+        .name = "nkeys",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.installArtifact(lib);
+
     const znk_tests = b.addTest(.{
         .root_source_file = .{ .path = "tool/znk.zig" },
         .target = target,
@@ -45,9 +54,6 @@ pub fn build(b: *std.build.Builder) !void {
     znk.addOptions("build_options", znk_options);
 
     b.installArtifact(znk);
-
-    const znk_step = b.step("znk", "Build znk");
-    znk_step.dependOn(b.getInstallStep());
 
     const znk_run_cmd = b.addRunArtifact(znk);
     znk_run_cmd.step.dependOn(b.getInstallStep());
