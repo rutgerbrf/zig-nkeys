@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install the latest Zig version
-        run: sudo snap install zig --classic
+        run: sudo snap install zig --classic --beta
 
       - uses: actions/checkout@v2
 
