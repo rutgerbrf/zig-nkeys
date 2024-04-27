@@ -438,7 +438,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
         fn generatePrivate(self: *Self) !void {
             var rr = RandomReader.init(&std.crypto.random);
             var brr = io.BufferedReader(1024 * 4096, @TypeOf(rr.reader())){ .unbuffered_reader = rr.reader() };
-            while (!self.done.load(.SeqCst)) {
+            while (!self.done.load(.seq_cst)) {
                 const gen_result = if (self.entropy) |entropy|
                     nkeys.SeedKeyPair.generateWithCustomEntropy(self.role, entropy)
                 else
@@ -447,7 +447,7 @@ fn PrefixKeyGenerator(comptime EntropyReaderType: type) type {
 
                 var public_key = kp.publicKeyText();
                 if (mem.startsWith(u8, public_key[1..], self.prefix)) {
-                    if (self.done.swap(true, .SeqCst)) return; // another thread is already done
+                    if (self.done.swap(true, .seq_cst)) return; // another thread is already done
 
                     info("{s}", .{kp.seedText()});
                     info("{s}", .{public_key});
